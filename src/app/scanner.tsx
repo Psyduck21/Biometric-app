@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, useCameraDevice, useCameraPermission, useFrameOutput } from 'react-native-vision-camera';
 import { Worklets } from 'react-native-worklets-core';
 import { useSelector } from 'react-redux';
-import { useResizePlugin } from 'vision-camera-resize-plugin';
+import { useResizer } from 'react-native-vision-camera-resizer';
 import { T } from '../design-system/theme2';
 import { appSessionService } from '../services/AppSessionService';
 import { authenticationService } from '../services/AuthenticationService';
@@ -69,7 +69,22 @@ export default function ScannerScreen() {
   const device = useCameraDevice('front');
 
   // Load Models
-  const resizePlugin = useResizePlugin();
+  const { resizer: blazeResizer } = useResizer({
+    width: 128,
+    height: 128,
+    channelOrder: 'rgb',
+    dataType: 'float32',
+    scaleMode: 'cover',
+    pixelLayout: 'interleaved'
+  });
+  const { resizer: faceResizer } = useResizer({
+    width: 112,
+    height: 112,
+    channelOrder: 'rgb',
+    dataType: 'float32',
+    scaleMode: 'cover',
+    pixelLayout: 'interleaved'
+  });
   const blazeface = useTensorflowModel(require('../../assets/models/blazeface/blazeface.tflite'), []);
   const antispoofing = useTensorflowModel(require('../../assets/models/antispoofing/2.7_80x80_MiniFASNetV2.tflite'), []);
   const mobilefacenet = useTensorflowModel(require('../../assets/models/mobilefacenet/mobilefacenet.tflite'), []);
@@ -145,14 +160,12 @@ export default function ScannerScreen() {
     
       try {
         // 1. Resize to 128x128 for BlazeFace
-        const blazefaceInput = resizePlugin.resize(frame, {
-          scale: { width: 128, height: 128 },
-          pixelFormat: 'rgb',
-          dataType: 'float32',
-        });
+        if (!blazeResizer || !faceResizer) return;
+        const blazeFrame = blazeResizer.resize(frame);
+        const bfArray = new Float32Array(blazeFrame.getPixelBuffer());
+        blazeFrame.dispose();
 
         // Normalize 0-255 to -1.0 to 1.0 inline
-        const bfArray = new Float32Array(blazefaceInput.buffer);
         for (let i = 0; i < bfArray.length; i++) {
           bfArray[i] = (bfArray[i] / 127.5) - 1.0;
         }
@@ -172,17 +185,12 @@ export default function ScannerScreen() {
         const face = detection.faces[0];
 
         // 2. Crop Face for AntiSpoofing & MobileFaceNet
-        const cropBounds = calculateFaceCrop(frame.width, frame.height, face);
-
-        const faceCrop = resizePlugin.resize(frame, {
-          crop: cropBounds,
-          scale: { width: 112, height: 112 },
-          pixelFormat: 'rgb',
-          dataType: 'float32',
-        });
+        // Using Option 1: Full-Frame Scaling
+        const faceCropFrame = faceResizer.resize(frame);
+        const fmArray = new Float32Array(faceCropFrame.getPixelBuffer());
+        faceCropFrame.dispose();
 
         // Normalize -1.0 to 1.0
-        const fmArray = new Float32Array(faceCrop.buffer);
         for (let i = 0; i < fmArray.length; i++) {
           fmArray[i] = (fmArray[i] / 127.5) - 1.0;
         }
