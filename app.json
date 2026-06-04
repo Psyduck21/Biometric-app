@@ -7,7 +7,6 @@
     "icon": "./assets/images/icon.png",
     "scheme": "biometric",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "assetBundlePatterns": [
       "assets/images/**",
       "assets/models/**"
@@ -23,8 +22,6 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false,
       "package": "com.akshatprj.biometric"
     },
     "web": {
@@ -50,7 +47,13 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 26
+            "minSdkVersion": 26,
+            "newArchEnabled": true,
+            "edgeToEdgeEnabled": true,
+            "predictiveBackGestureEnabled": false
+          },
+          "ios": {
+            "newArchEnabled": true
           }
         }
       ]

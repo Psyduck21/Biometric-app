@@ -77,21 +77,16 @@ export class CryptoService {
     private static PRIVATE_KEY_SERVICE = "biometric.app.privatekey";
 
     static async createMasterKey(key: string): Promise<void> {
-        const nativeKeychain = (NativeModules as any).Keychain ?? (NativeModules as any).RNKeychain ?? null;
-        if (nativeKeychain && typeof nativeKeychain.setGenericPasswordForOptions === 'function' && typeof Keychain.setGenericPassword === 'function') {
-            try {
-                await Keychain.setGenericPassword('masterkey', key, {
-                    service: CryptoService.SERVICE_KEY,
-                    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-                    securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
-                });
-                console.log('[CryptoService] Stored master key in native Keychain');
-                return;
-            } catch (e) {
-                throw new Error(`[CryptoService] Failed to store master key in native Keychain: ${e instanceof Error ? e.message : String(e)}`);
-            }
+        try {
+            await Keychain.setGenericPassword('masterkey', key, {
+                service: CryptoService.SERVICE_KEY,
+                accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+                securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
+            });
+            console.log('[CryptoService] Stored master key in native Keychain');
+        } catch (e) {
+            throw new Error(`[CryptoService] Failed to store master key in native Keychain: ${e instanceof Error ? e.message : String(e)}`);
         }
-        throw new Error('[CryptoService] Native Keychain is required but unavailable. Hardware-backed security is mandated.');
     }
 
     static async ensureMasterKey(): Promise<string> {
@@ -104,57 +99,44 @@ export class CryptoService {
     }
 
     static async getMasterKey(): Promise<string | null> {
-        const nativeKeychain = (NativeModules as any).Keychain ?? (NativeModules as any).RNKeychain ?? null;
-        if (nativeKeychain && typeof nativeKeychain.getGenericPassword === 'function' && typeof Keychain.getGenericPassword === 'function') {
-            try {
-                const credentials = await Keychain.getGenericPassword({
-                    service: CryptoService.SERVICE_KEY,
-                });
-                if (!credentials) {
-                    return null;
-                }
-                return credentials.password;
-            } catch (e) {
-                throw new Error(`[CryptoService] Failed to retrieve master key from native Keychain: ${e instanceof Error ? e.message : String(e)}`);
+        try {
+            const credentials = await Keychain.getGenericPassword({
+                service: CryptoService.SERVICE_KEY,
+            });
+            if (!credentials) {
+                return null;
             }
+            return credentials.password;
+        } catch (e) {
+            throw new Error(`[CryptoService] Failed to retrieve master key from native Keychain: ${e instanceof Error ? e.message : String(e)}`);
         }
-        throw new Error('[CryptoService] Native Keychain is required but unavailable. Hardware-backed security is mandated.');
     }
 
     static async saveDevicePrivateKey(privateKey: string): Promise<void> {
-        const nativeKeychain = (NativeModules as any).Keychain ?? (NativeModules as any).RNKeychain ?? null;
-        if (nativeKeychain && typeof nativeKeychain.setGenericPasswordForOptions === 'function' && typeof Keychain.setGenericPassword === 'function') {
-            try {
-                await Keychain.setGenericPassword('devicekey', privateKey, {
-                    service: CryptoService.PRIVATE_KEY_SERVICE,
-                    accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-                    securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
-                });
-                console.log('[CryptoService] Stored device private key in native Keychain');
-                return;
-            } catch (e) {
-                throw new Error(`[CryptoService] Failed to store device key in native Keychain: ${e instanceof Error ? e.message : String(e)}`);
-            }
+        try {
+            await Keychain.setGenericPassword('devicekey', privateKey, {
+                service: CryptoService.PRIVATE_KEY_SERVICE,
+                accessible: Keychain.ACCESSIBLE.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+                securityLevel: Keychain.SECURITY_LEVEL.SECURE_HARDWARE,
+            });
+            console.log('[CryptoService] Stored device private key in native Keychain');
+        } catch (e) {
+            throw new Error(`[CryptoService] Failed to store device key in native Keychain: ${e instanceof Error ? e.message : String(e)}`);
         }
-        throw new Error('[CryptoService] Native Keychain is required but unavailable. Hardware-backed security is mandated.');
     }
 
     static async getDevicePrivateKey(): Promise<string | null> {
-        const nativeKeychain = (NativeModules as any).Keychain ?? (NativeModules as any).RNKeychain ?? null;
-        if (nativeKeychain && typeof nativeKeychain.getGenericPassword === 'function' && typeof Keychain.getGenericPassword === 'function') {
-            try {
-                const credentials = await Keychain.getGenericPassword({
-                    service: CryptoService.PRIVATE_KEY_SERVICE,
-                });
-                if (!credentials) {
-                    return null;
-                }
-                return credentials.password;
-            } catch (e) {
-                throw new Error(`[CryptoService] Failed to retrieve device key from native Keychain: ${e instanceof Error ? e.message : String(e)}`);
+        try {
+            const credentials = await Keychain.getGenericPassword({
+                service: CryptoService.PRIVATE_KEY_SERVICE,
+            });
+            if (!credentials) {
+                return null;
             }
+            return credentials.password;
+        } catch (e) {
+            throw new Error(`[CryptoService] Failed to retrieve device key from native Keychain: ${e instanceof Error ? e.message : String(e)}`);
         }
-        throw new Error('[CryptoService] Native Keychain is required but unavailable. Hardware-backed security is mandated.');
     }
 
 
