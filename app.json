@@ -8,6 +8,10 @@
     "scheme": "biometric",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "assetBundlePatterns": [
+      "assets/images/**",
+      "assets/models/**"
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.akshatprj.biometric"
@@ -41,7 +45,15 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
