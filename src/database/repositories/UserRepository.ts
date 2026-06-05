@@ -103,4 +103,8 @@ export class UserRepository {
         );
     }
 
+    static async deleteUser(id: string): Promise<void> {
+        const db = dbClient.getDb();
+        await db.execute('DELETE FROM users WHERE id = ?', [id]);
+    }
 }

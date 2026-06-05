@@ -35,13 +35,15 @@ export class ApiService {
     }
 
     private async request<T>(method: string, endpoint: string, body?: any): Promise<ApiResponse<T>> {
-        // Retrieve base URL from config. Defaults to a placeholder for local development.
-        const baseUrl = await ConfigRepository.getString('api_base_url', 'https://api.example.com/v1');
+        // Retrieve base URL from environment variables, fallback to ConfigRepository, fallback to placeholder
+        const envUrl = process.env.EXPO_PUBLIC_SUPABASE_PROJECT_URL ? `${process.env.EXPO_PUBLIC_SUPABASE_PROJECT_URL}/rest/v1` : null;
+        const baseUrl = envUrl || await ConfigRepository.getString('api_base_url', 'https://api.example.com/v1');
+
         const deviceId = await deviceBindingService.getDeviceId();
-        
         const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
 
-        const supabaseKey = await ConfigRepository.getString('supabase_anon_key', '');
+        const envKey = process.env.EXPO_PUBLIC_SUPABASE_API_KEY || null;
+        const supabaseKey = envKey || await ConfigRepository.getString('supabase_anon_key', '');
 
         const headers: HeadersInit = {
             'Content-Type': 'application/json',
@@ -59,7 +61,7 @@ export class ApiService {
 
         try {
             console.log(`[ApiService] ${method} ${url}`);
-            
+
             const response = await fetch(url, {
                 method,
                 headers,
@@ -93,7 +95,7 @@ export class ApiService {
 
         } catch (error: any) {
             clearTimeout(timeoutId);
-            
+
             if (error.name === 'AbortError') {
                 return { success: false, status: 408, error: 'Request Timeout' };
             }

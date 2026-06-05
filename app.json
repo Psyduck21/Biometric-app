@@ -22,7 +22,10 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "package": "com.akshatprj.biometric"
+      "package": "com.akshatprj.biometric",
+      "permissions": [
+        "CAMERA"
+      ]
     },
     "web": {
       "output": "static",

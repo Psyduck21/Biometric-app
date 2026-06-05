@@ -1,6 +1,6 @@
 import * as Crypto from "expo-crypto";
 import { NativeModules } from 'react-native';
-import AesCrypto from "react-native-aes-crypto";
+
 import * as Keychain from "react-native-keychain";
 import crypto, { subtle } from 'react-native-quick-crypto';
 import { Buffer } from 'buffer';
@@ -155,6 +155,9 @@ export class CryptoService {
         let encrypted = cipher.update(plaintext, 'utf8', 'base64');
         encrypted += cipher.final('base64');
         const tag = cipher.getAuthTag().toString('base64');
+        if (!tag || Buffer.from(tag, 'base64').byteLength !== 16) {
+            console.warn(`[CryptoService] encrypt generated an invalid auth tag length. Tag: ${tag}`);
+        }
         return { cipher: encrypted, iv: ivBuffer.toString('base64'), tag };
     }
 
@@ -171,6 +174,9 @@ export class CryptoService {
         const keyBuffer = Buffer.from(key, 'hex') as any;
         const ivBuffer = Buffer.from(iv, 'base64') as any;
         const tagBuffer = Buffer.from(tag, 'base64') as any;
+        if (!tagBuffer || tagBuffer.byteLength < 1 || tagBuffer.byteLength > 16) {
+            throw new Error(`Invalid auth tag length for GCM/OCB: ${tagBuffer?.byteLength || 0} bytes. Tag was: '${tag}'`);
+        }
         const decipher = crypto.createDecipheriv('aes-256-gcm', keyBuffer, ivBuffer);
         decipher.setAuthTag(tagBuffer);
         let decrypted = decipher.update(cipherText, 'base64', 'utf8');
@@ -208,57 +214,22 @@ export class CryptoService {
     }
 
     /**
-     * Generate a random hex string of length (bytes*2). Tries multiple fallbacks:
-     * 1) react-native-aes-crypto.randomKey(bytes)
-     * 2) expo-crypto.getRandomBytesAsync(bytes) if available
-     * 3) global.crypto.getRandomValues
+     * Generate a random hex string of length (bytes*2) using react-native-quick-crypto.
      */
     private static async generateRandomHex(bytes: number): Promise<string> {
-        // Preferred: react-native-aes-crypto
-        try {
-            if (typeof AesCrypto.randomKey === 'function') {
-                return await AesCrypto.randomKey(bytes);
-            }
-        } catch (e) {
-            // Fall through to other methods
-            console.warn('[CryptoService] AesCrypto.randomKey failed, falling back', e);
-        }
-
-        // expo-crypto: getRandomBytesAsync (if available)
-        try {
-            // @ts-ignore - feature may not exist on this expo-crypto version
-            if (typeof (Crypto as any).getRandomBytesAsync === 'function') {
-                const arr: Uint8Array = await (Crypto as any).getRandomBytesAsync(bytes);
-                return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-            }
-        } catch (e) {
-            console.warn('[CryptoService] expo-crypto getRandomBytesAsync failed', e);
-        }
-
-        // global crypto.getRandomValues
-        try {
-            const globalCrypto = (globalThis as any).crypto ?? (globalThis as any).msCrypto ?? null;
-            if (globalCrypto && typeof globalCrypto.getRandomValues === 'function') {
-                const arr = new Uint8Array(bytes);
-                globalCrypto.getRandomValues(arr);
-                return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-            }
-        } catch (e) {
-            console.warn('[CryptoService] global.crypto.getRandomValues failed', e);
-        }
-
-        throw new Error('[CryptoService] No available secure random generator (AesCrypto/expo-crypto/global.crypto). Install and link react-native-aes-crypto or expo-random.');
+        return crypto.randomBytes(bytes).toString('hex');
     }
 
     /**
-     * Computes an HMAC-SHA256 signature.
+     * Computes an HMAC-SHA256 signature using react-native-quick-crypto.
      *
      * @param data - The message to sign.
      * @param key  - The secret key (hex string).
      * @returns The HMAC digest as a hex string.
      */
     static async hmac(data: string, key: string): Promise<string> {
-        return AesCrypto.hmac256(data, key);
+        const keyBuffer = Buffer.from(key, 'hex');
+        return crypto.createHmac('sha256', keyBuffer).update(data, 'utf8').digest('hex');
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -372,36 +343,5 @@ export class CryptoService {
         return JSON.stringify(ordered);
     }
 
-    /**
-     * Rotates the Master AES key with atomic locks.
-     */
-    private static isRotating = false;
 
-    static async rotateKeys(oldVersion: string, newVersion: string): Promise<boolean> {
-        if (this.isRotating) {
-            console.warn('[CryptoService] Key rotation already in progress. Aborting.');
-            return false;
-        }
-
-        this.isRotating = true;
-        try {
-            console.log(`[CryptoService] Initiating AES key rotation from ${oldVersion} to ${newVersion}`);
-            // 1. Generate new AES key
-            const newKey = await CryptoService.generateRandomHex(32);
-
-            // 2. Store new key in Keychain alongside old key
-            // (Implementation involves appending version suffix to the Keychain service name)
-
-            // 3. The database migration will happen externally in a SQLite transaction.
-            // Old key is ONLY deleted after DB commits the new encrypted templates.
-
-            console.log(`[CryptoService] Key rotation complete.`);
-            return true;
-        } catch (error) {
-            console.error('[CryptoService] Key rotation failed:', error);
-            return false;
-        } finally {
-            this.isRotating = false;
-        }
-    }
 }

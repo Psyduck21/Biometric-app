@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  Image,
   Pressable,
   StatusBar,
   StyleSheet,
@@ -13,27 +14,148 @@ import { useSelector } from 'react-redux';
 import { T } from '../design-system/theme2';
 import { appSessionService } from '../services/AppSessionService';
 import { RootState } from '../store';
+import { useAppDispatch } from '../store/hooks';
+import { setProfile } from '../store/slices/authSlices';
 import { User } from '../types/domain';
 
+const NUM_DOTS = 50;
+
+function FloatingDots() {
+  const dots = useRef(
+    Array.from({ length: NUM_DOTS }).map(() => ({
+      x: Math.random() * 100, // %
+      y: Math.random() * 100, // %
+      size: Math.random() * 4 + 2, // 2 to 6px
+      // 20% chance to be a darker yellow
+      color: Math.random() > 0.8 ? '#FFB300' : T.yellow,
+      animX: new Animated.Value(0),
+      animY: new Animated.Value(0),
+      animOpacity: new Animated.Value(Math.random() * 0.5 + 0.1),
+    }))
+  ).current;
+
+  useEffect(() => {
+    dots.forEach((dot) => {
+      const driftX = (currentX: number) => {
+        // Drift to a new random position between -150 and 150 relative to start
+        // but biased by current position so it wanders
+        let nextX = currentX + (Math.random() - 0.5) * 120;
+        if (nextX > 150) nextX = 150 - Math.random() * 50;
+        if (nextX < -150) nextX = -150 + Math.random() * 50;
+
+        Animated.timing(dot.animX, {
+          toValue: nextX,
+          duration: Math.random() * 6000 + 4000,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) driftX(nextX);
+        });
+      };
+      
+      const driftY = (currentY: number) => {
+        let nextY = currentY + (Math.random() - 0.5) * 120;
+        if (nextY > 150) nextY = 150 - Math.random() * 50;
+        if (nextY < -150) nextY = -150 + Math.random() * 50;
+
+        Animated.timing(dot.animY, {
+          toValue: nextY,
+          duration: Math.random() * 6000 + 4000,
+          useNativeDriver: true,
+        }).start(({ finished }) => {
+          if (finished) driftY(nextY);
+        });
+      };
+
+      driftX(0);
+      driftY(0);
+    });
+  }, [dots]);
+
+  return (
+    <View style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 450, overflow: 'hidden', zIndex: 0 }}>
+      {dots.map((dot, i) => (
+        <Animated.View
+          key={i}
+          style={{
+            position: 'absolute',
+            left: `${dot.x}%`,
+            top: `${dot.y}%`,
+            width: dot.size,
+            height: dot.size,
+            borderRadius: dot.size / 2,
+            backgroundColor: dot.color,
+            opacity: dot.animOpacity,
+            transform: [
+              { translateX: dot.animX },
+              { translateY: dot.animY }
+            ],
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
 function FaceIcon() {
+  const scanAnim = useRef(new Animated.Value(0)).current;
+  const gridScaleAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    // Scan animation loop
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(scanAnim, {
+          toValue: 0,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    // Grid breathing scale loop
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(gridScaleAnim, {
+          toValue: 1.1,
+          duration: 4000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(gridScaleAnim, {
+          toValue: 1,
+          duration: 4000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, [scanAnim]);
+
+  const translateY = scanAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-100, 100],
+  });
+
   return (
     <View style={s.faceIcon}>
-      {/* Outer ring */}
-      <View style={s.faceRingOuter} />
-      {/* Face oval */}
-      <View style={s.faceOval} />
-      {/* Eyes */}
-      <View style={[s.faceEye, { left: 28, top: 38 }]} />
-      <View style={[s.faceEye, { right: 28, top: 38 }]} />
-      {/* Nose bridge */}
-      <View style={s.faceNose} />
-      {/* Mouth arc */}
-      <View style={s.faceMouth} />
-      {/* Corner scan brackets */}
-      <View style={[s.bracket, s.bracketTL]} />
-      <View style={[s.bracket, s.bracketTR]} />
-      <View style={[s.bracket, s.bracketBL]} />
-      <View style={[s.bracket, s.bracketBR]} />
+      {/* Face Mesh Image (White Background) */}
+      <Image
+        source={require('../../assets/images/icon.png')}
+        style={{ width: '100%', height: '100%', resizeMode: 'contain', zIndex: 1 }}
+      />
+
+      {/* Perfect Corner Brackets */}
+      <View style={{ position: 'absolute', width: '100%', height: '100%', zIndex: 3 }}>
+        <View style={[s.bracket, s.bracketTL]} />
+        <View style={[s.bracket, s.bracketTR]} />
+        <View style={[s.bracket, s.bracketBL]} />
+        <View style={[s.bracket, s.bracketBR]} />
+      </View>
+
+      <Animated.View style={[s.scanOverlayLine, { transform: [{ translateY }], zIndex: 4 }]} />
     </View>
   );
 }
@@ -54,6 +176,7 @@ function PulsingDot() {
 }
 
 export default function HomeScreen() {
+  const dispatch = useAppDispatch();
   const currentUser = useSelector((state: RootState) => state.auth.currentUser);
 
   const [resolvedUser, setResolvedUser] = useState<User | null>(currentUser);
@@ -66,6 +189,11 @@ export default function HomeScreen() {
       return;
     }
     appSessionService.resolveLaunchState().then(state => {
+      if (state.isEnrollmentIncomplete && state.user) {
+        dispatch(setProfile(state.user as User));
+        router.replace({ pathname: '/enrollment', params: { resume: 'true' } } as any);
+        return;
+      }
       if (state.user) {
         setResolvedUser(state.user as User);
       } else {
@@ -90,6 +218,9 @@ export default function HomeScreen() {
   return (
     <SafeAreaView style={s.root}>
       <StatusBar barStyle="dark-content" backgroundColor={T.white} />
+
+      {/* Custom Drifting Dots Background */}
+      <FloatingDots />
 
       {/* ── Top decorative line ── */}
       <View style={s.topAccent} />
@@ -206,75 +337,46 @@ const s = StyleSheet.create({
     marginVertical: T.sp8,
   },
   faceIcon: {
-    width: 160,
-    height: 160,
+    width: 240,
+    height: 240,
     position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  faceRingOuter: {
+  scanOverlayLine: {
     position: 'absolute',
-    width: 148,
-    height: 148,
-    borderRadius: 74,
-    borderWidth: 1,
-    borderColor: T.hairline,
-    borderStyle: 'dashed',
-  },
-  faceOval: {
-    width: 88,
-    height: 108,
-    borderRadius: 44,
-    borderWidth: BRACKET_THICK,
-    borderColor: T.black,
-    backgroundColor: 'transparent',
-  },
-  faceEye: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: T.black,
-  },
-  faceNose: {
-    position: 'absolute',
-    top: 55,
-    width: 1.5,
-    height: 14,
-    backgroundColor: T.muted,
-  },
-  faceMouth: {
-    position: 'absolute',
-    bottom: 32,
-    width: 28,
-    height: 12,
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 14,
-    borderLeftWidth: BRACKET_THICK,
-    borderRightWidth: BRACKET_THICK,
-    borderBottomWidth: BRACKET_THICK,
-    borderColor: T.black,
+    width: '100%',
+    height: 0,
+    borderBottomWidth: 2,
+    borderStyle: 'dotted',
+    borderColor: 'rgba(255, 193, 7, 0.9)',
+    zIndex: 10,
+    shadowColor: '#FFC107',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 10,
+    elevation: 4,
   },
   // Scan brackets
-  bracket: { position: 'absolute', width: BRACKET_LEN, height: BRACKET_LEN },
+  bracket: { position: 'absolute', width: 24, height: 24 },
   bracketTL: {
-    top: 8, left: 8,
-    borderTopWidth: BRACKET_THICK, borderLeftWidth: BRACKET_THICK, borderColor: T.yellow,
+    top: 0, left: 0,
+    borderTopWidth: 3, borderLeftWidth: 3, borderColor: T.yellow,
     borderTopLeftRadius: T.r6,
   },
   bracketTR: {
-    top: 8, right: 8,
-    borderTopWidth: BRACKET_THICK, borderRightWidth: BRACKET_THICK, borderColor: T.yellow,
+    top: 0, right: 0,
+    borderTopWidth: 3, borderRightWidth: 3, borderColor: T.yellow,
     borderTopRightRadius: T.r6,
   },
   bracketBL: {
-    bottom: 8, left: 8,
-    borderBottomWidth: BRACKET_THICK, borderLeftWidth: BRACKET_THICK, borderColor: T.yellow,
+    bottom: 0, left: 0,
+    borderBottomWidth: 3, borderLeftWidth: 3, borderColor: T.yellow,
     borderBottomLeftRadius: T.r6,
   },
   bracketBR: {
-    bottom: 8, right: 8,
-    borderBottomWidth: BRACKET_THICK, borderRightWidth: BRACKET_THICK, borderColor: T.yellow,
+    bottom: 0, right: 0,
+    borderBottomWidth: 3, borderRightWidth: 3, borderColor: T.yellow,
     borderBottomRightRadius: T.r6,
   },
 

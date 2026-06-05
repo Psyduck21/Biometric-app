@@ -65,7 +65,7 @@ export class AuthenticationService {
             return { success: false, failureReason: 'no_match' };
         }
 
-        const matchThreshold = await ConfigRepository.getNumber('similarity_threshold', 0.65);
+        const matchThreshold = await ConfigRepository.getNumber('similarity_threshold', 0.85);
         let bestScore = 0;
 
         try {
