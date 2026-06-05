@@ -5,9 +5,9 @@
  * by all repository and service layers.
  */
 
-import { BoundingBox, AlignedFrame, Landmark, EulerAngles, DetectionResult } from './models';
+import { BoundingBox, AlignedFrame, EulerAngles } from './models';
 
-export type { BoundingBox, AlignedFrame, Landmark, EulerAngles, DetectionResult };
+export type { BoundingBox, AlignedFrame, EulerAngles };
 
 // ---------------------------------------------------------------------------
 // User

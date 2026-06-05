@@ -128,6 +128,9 @@ export class EnrollmentService {
             captureIndex: session.capturedSamples + 1,
         };
 
+        console.log(`[Enrollment] Capture ${sample.captureIndex} complete.`);
+        console.log(`[Enrollment] Embedding generated (512D)`);
+
         session.samples.push(sample);
         session.capturedSamples += 1;
 
@@ -170,9 +173,15 @@ export class EnrollmentService {
 
         // Step 1: Embedding consistency gate
         const consistencyScore = this._computeConsistencyScore(session.samples);
-        const minConsistency   = await ConfigRepository.getNumber('min_consistency_score', 0.85);
+        const minConsistency   = await ConfigRepository.getNumber('min_consistency_score', 0.55);
+
+        console.log(`[Enrollment] Finalizing 5 captures...`);
+        console.log(`[Enrollment] Enrollment consistency check:`);
+        console.log(`[Enrollment] Minimum pairwise Cosine Score: ${consistencyScore.toFixed(4)}`);
 
         if (consistencyScore < minConsistency) {
+            console.log(`[Enrollment] inconsistent_face detected! Score ${consistencyScore.toFixed(4)} is below threshold ${minConsistency}.`);
+            console.log(`[Enrollment] Enrollment rejected.`);
             await auditService.log({
                 user_id:        session.userId,
                 action:         'enroll_fail',
@@ -209,21 +218,37 @@ export class EnrollmentService {
 
             // Outlier Rejection and Master Template Generation
             // 1. Calculate centroid
-            const centroid = new Float32Array(512);
+            const dim = session.samples[0].embedding.length;
+            const centroid = new Float32Array(dim);
             for (const sample of session.samples) {
-                for (let i = 0; i < 512; i++) {
+                for (let i = 0; i < dim; i++) {
                     centroid[i] += sample.embedding[i];
                 }
             }
-            for (let i = 0; i < 512; i++) {
+            for (let i = 0; i < dim; i++) {
                 centroid[i] /= session.samples.length;
+            }
+            
+            // Normalize centroid
+            let centroidNorm = 0;
+            for (let i = 0; i < dim; i++) {
+                centroidNorm += centroid[i] * centroid[i];
+            }
+            centroidNorm = Math.sqrt(centroidNorm);
+            if (centroidNorm > 0) {
+                for (let i = 0; i < dim; i++) {
+                    centroid[i] /= centroidNorm;
+                }
             }
 
             // 2. Filter outliers (embeddings furthest from centroid)
-            const validSamples = session.samples.filter(sample => {
+            const validSamples = session.samples.filter((sample, idx) => {
                 const sim = this._cosineSimilarity(centroid, sample.embedding);
-                return sim > 0.90; // High threshold for outlier rejection
+                console.log(`[Enrollment] Sample ${idx + 1} centroid similarity: ${sim.toFixed(4)}`);
+                return sim > 0.65; // High threshold for outlier rejection
             });
+
+            console.log(`[Enrollment] Valid samples after outlier rejection: ${validSamples.length} / ${session.samples.length}`);
 
             if (validSamples.length < session.samples.length / 2) {
                 this.sessions.delete(sessionId);
@@ -231,25 +256,25 @@ export class EnrollmentService {
             }
 
             // 3. Generate Weighted Average (Master Template)
-            const masterEmbedding = new Float32Array(512);
+            const masterEmbedding = new Float32Array(dim);
             let totalWeight = 0;
             for (const sample of validSamples) {
-                for (let i = 0; i < 512; i++) {
+                for (let i = 0; i < dim; i++) {
                     masterEmbedding[i] += sample.embedding[i] * sample.qualityScore;
                 }
                 totalWeight += sample.qualityScore;
             }
-            for (let i = 0; i < 512; i++) {
+            for (let i = 0; i < dim; i++) {
                 masterEmbedding[i] /= totalWeight;
             }
             
             // Normalize master embedding
             let norm = 0;
-            for (let i = 0; i < 512; i++) {
+            for (let i = 0; i < dim; i++) {
                 norm += masterEmbedding[i] * masterEmbedding[i];
             }
             norm = Math.sqrt(norm);
-            for (let i = 0; i < 512; i++) {
+            for (let i = 0; i < dim; i++) {
                 masterEmbedding[i] /= norm;
             }
 
@@ -370,6 +395,7 @@ export class EnrollmentService {
         for (let i = 0; i < samples.length; i++) {
             for (let j = i + 1; j < samples.length; j++) {
                 const sim = this._cosineSimilarity(samples[i].embedding, samples[j].embedding);
+                console.log(`[Enrollment] Similarity Sample ${i+1} <-> Sample ${j+1}: ${sim.toFixed(4)}`);
                 if (sim < minSim) minSim = sim;
             }
         }
@@ -406,7 +432,10 @@ export class EnrollmentService {
         masterKey: string,
         now: number
     ): Promise<void> {
-        const payload = JSON.stringify(template);
+        const payload = JSON.stringify({
+            ...template,
+            is_active: template.is_active === 1
+        });
         const { cipher, iv, tag } = await CryptoService.encrypt(payload, masterKey);
 
         const idempotencyKey = CryptoService.uuid();

@@ -5,22 +5,22 @@
 
 export const T = {
   // Core palette
-  white:       '#FFFFFF',
-  offWhite:    '#F9F9F7',
-  yellow:      '#F5C518',
+  white: '#FFFFFF',
+  offWhite: '#F9F9F7',
+  yellow: 'rgba(255, 193, 7, 0.9)',
   yellowLight: '#FEF3C7',
-  yellowDark:  '#D4A800',
-  black:       '#0A0A0A',
-  charcoal:    '#1A1A1A',
-  ink:         '#2C2C2C',
-  muted:       '#6B6B6B',
-  hairline:    '#E5E5E5',
-  divider:     '#D4D4D4',
+  yellowDark: '#D4A800',
+  black: '#0A0A0A',
+  charcoal: '#1A1A1A',
+  ink: '#2C2C2C',
+  muted: '#6B6B6B',
+  hairline: '#E5E5E5',
+  divider: '#D4D4D4',
 
   // Semantic
-  success:     '#16A34A',
-  error:       '#DC2626',
-  warning:     '#D97706',
+  success: '#16A34A',
+  error: '#DC2626',
+  warning: '#D97706',
 
   // Type scale
   fs10: 10,
@@ -39,9 +39,9 @@ export const T = {
   fs40: 40,
 
   // Spacing
-  sp4:  4,
-  sp6:  6,
-  sp8:  8,
+  sp4: 4,
+  sp6: 6,
+  sp8: 8,
   sp10: 10,
   sp12: 12,
   sp14: 14,
@@ -54,8 +54,8 @@ export const T = {
   sp48: 48,
 
   // Radii
-  r6:  6,
-  r8:  8,
+  r6: 6,
+  r8: 8,
   r12: 12,
   r16: 16,
   r20: 20,

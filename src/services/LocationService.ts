@@ -98,25 +98,28 @@ export class LocationService {
         const radius = await ConfigRepository.getNumber('geofence_radius_meters', 100);
         const centerLatStr = await ConfigRepository.getString('geofence_center_lat', '');
         const centerLonStr = await ConfigRepository.getString('geofence_center_lon', '');
+        const geofenceId = await ConfigRepository.getString('geofence_id', '');
+
+        const finalGeofenceId = geofenceId ? geofenceId : undefined;
 
         if (!centerLatStr || !centerLonStr) {
             // No geofence configured, allow punch everywhere (or fail depending on strictness)
             // Let's assume valid if no geofence is set up.
-            return { valid: true };
+            return { valid: true, geofenceId: finalGeofenceId };
         }
 
         const centerLat = parseFloat(centerLatStr);
         const centerLon = parseFloat(centerLonStr);
         
         if (isNaN(centerLat) || isNaN(centerLon)) {
-             return { valid: true };
+             return { valid: true, geofenceId: finalGeofenceId };
         }
 
         const distance = this.haversineDistance(location, { latitude: centerLat, longitude: centerLon });
         
         return {
             valid: distance <= radius,
-            geofenceId: 'default-hq', // Can be parameterized later
+            geofenceId: finalGeofenceId,
         };
     }
 }

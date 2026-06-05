@@ -15,40 +15,6 @@ export interface BoundingBox {
 }
 
 /**
- * Represents a 2D landmark point on a face (e.g., eye corner, nose tip)
- */
-export interface Landmark {
-    x: number;
-    y: number;
-}
-
-/**
- * Represents a detected face in a camera frame
- */
-export interface FaceDetection {
-    /** Bounding box of the face */
-    bbox: BoundingBox;
-    /** Confidence score from the detector (0.0 to 1.0) */
-    confidence: number;
-    /** Key facial landmarks (usually 6 for BlazeFace: eyes, ears, nose, mouth) */
-    landmarks: Landmark[];
-}
-
-/**
- * Result of running a face detection pass on a single frame
- */
-export interface DetectionResult {
-    /** Array of faces detected in the frame */
-    faces: FaceDetection[];
-    /** Original width of the frame processed */
-    frameWidth: number;
-    /** Original height of the frame processed */
-    frameHeight: number;
-    /** Time taken to process the frame in milliseconds */
-    processingTimeMs: number;
-}
-
-/**
  * Represents a 112x112 RGB cropped and aligned face image ready for embedding
  */
 export interface AlignedFrame {

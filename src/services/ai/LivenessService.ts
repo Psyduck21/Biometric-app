@@ -1,16 +1,10 @@
-import { FaceDetection, Landmark } from '../../types/models';
+import { Face } from 'react-native-vision-camera-face-detector';
 import {
     ChallengeType,
     LivenessChallenge,
     LivenessMetrics,
     LivenessResult,
 } from '../../types/liveness';
-import {
-    estimateEARFromCentres,
-    estimateHeadPose,
-    computeSmileRatio,
-    computeFaceQuality,
-} from '../../utils/geometry';
 
 /**
  * LivenessService
@@ -25,12 +19,47 @@ import {
  * when a timeout or failure condition is reached.
  *
  * Challenge Types:
- *   BLINK      - EAR drops below 0.25 (eye closed) then rises above 0.28 (eye opened).
+ *   BLINK      - Eye open probability drops below 0.25 (eye closed) then rises above 0.65 (eye opened).
  *   HEAD_TURN  - Yaw exceeds ±15° in the instructed direction.
- *   SMILE      - Smile ratio exceeds 4.5 (equivalent to lip_ratio > 0.35).
+ *   SMILE      - Smile probability exceeds 0.65.
  *
  * The service issues challenges randomly to prevent pre-recording attacks.
  */
+
+export function extractLivenessMetrics(face: Face, frameWidth: number, frameHeight: number): LivenessMetrics {
+    'worklet';
+    const leftEyeOpen = face.leftEyeOpenProbability ?? 1.0;
+    const rightEyeOpen = face.rightEyeOpenProbability ?? 1.0;
+    const eyeOpenProb = (leftEyeOpen + rightEyeOpen) / 2;
+
+    const yaw = face.yawAngle;
+    const pitch = face.pitchAngle;
+    const roll = face.rollAngle;
+
+    const smileRatio = face.smilingProbability ?? 0.0;
+
+    const faceWidth = face.bounds.width;
+    const faceHeight = face.bounds.height;
+    const faceCentreX = face.bounds.x + faceWidth / 2;
+    const faceCentreY = face.bounds.y + faceHeight / 2;
+    
+    const frameCentreX = frameWidth / 2;
+    const frameCentreY = frameHeight / 2;
+    const distFromCentre = Math.sqrt(
+        Math.pow(faceCentreX - frameCentreX, 2) + Math.pow(faceCentreY - frameCentreY, 2)
+    );
+    const maxDist = Math.sqrt(Math.pow(frameWidth/2, 2) + Math.pow(frameHeight/2, 2));
+    const positionScore = Math.max(0, 1 - (distFromCentre / maxDist));
+    
+    const idealArea = (frameWidth * frameHeight) * 0.15;
+    const faceArea = faceWidth * faceHeight;
+    const sizeScore = Math.max(0, 1 - Math.abs(faceArea - idealArea) / idealArea);
+    
+    const faceQuality = (positionScore * 0.4) + (sizeScore * 0.6);
+
+    return { ear: eyeOpenProb, yaw, pitch, roll, smileRatio, faceQuality };
+}
+
 export class LivenessService {
     /**
      * Number of challenges a subject must complete to pass liveness.
@@ -42,21 +71,19 @@ export class LivenessService {
      * Maximum time in milliseconds allowed to complete a single challenge.
      * After this window the challenge is marked FAILED.
      */
-    private readonly CHALLENGE_TIMEOUT_MS = 5000;
+    private readonly CHALLENGE_TIMEOUT_MS = 10000;
 
     /**
-     * EAR threshold below which an eye is considered closed (blink detected).
-     * Reference: Soukupova & Cech (2016) – "Real-Time Eye Blink Detection Using
-     * Facial Landmarks", CVWW 2016.
+     * Eye open probability threshold below which an eye is considered closed (blink detected).
+     * Based on ML Kit's native probability scores.
      */
-    private readonly EAR_BLINK_THRESHOLD = 0.25;
+    private readonly EYE_CLOSED_THRESHOLD = 0.25;
 
     /**
-     * EAR threshold above which an eye is considered open again after a blink.
-     * Using a small hysteresis gap (0.25 close / 0.28 open) to avoid false
-     * positives from natural fluctuations.
+     * Eye open probability threshold above which an eye is considered open again after a blink.
+     * Using a small hysteresis gap to avoid false positives.
      */
-    private readonly EAR_OPEN_THRESHOLD = 0.28;
+    private readonly EYE_OPEN_THRESHOLD = 0.65;
 
     /**
      * Yaw threshold in degrees required to satisfy a HEAD_TURN challenge.
@@ -66,11 +93,10 @@ export class LivenessService {
     private readonly YAW_TURN_THRESHOLD = 15;
 
     /**
-     * Smile ratio threshold. Derived from Test Case A11: lip_ratio > 0.35.
-     * Expressed as mouth_width / mouth_height, a ratio > 4.5 corresponds
-     * approximately to a genuine broad smile.
+     * Smile probability threshold.
+     * Expressed as a probability (0.0 to 1.0) provided by ML Kit.
      */
-    private readonly SMILE_RATIO_THRESHOLD = 4.5;
+    private readonly SMILE_PROBABILITY_THRESHOLD = 0.65;
 
     /** Tracks whether the eye was closed in the previous frame (for blink state machine) */
     private wasEyeClosed = false;
@@ -84,6 +110,14 @@ export class LivenessService {
     /** Whether a liveness session is currently in progress */
     private sessionActive = false;
 
+    /** Timestamp until which the service pauses evaluation (e.g., between challenges) */
+    private nextChallengeTime = 0;
+
+    /** Rolling window for pitch/yaw to detect static photos (Passive Liveness) */
+    private pitchHistory: number[] = [];
+    private yawHistory: number[] = [];
+    private readonly PASSIVE_HISTORY_SIZE = 15;
+
     /**
      * Begins a new liveness challenge session.
      * Resets all state and randomly selects the required challenges.
@@ -96,7 +130,10 @@ export class LivenessService {
         this.wasEyeClosed = false;
         this.activeChallengeIndex = 0;
         this.sessionActive = true;
+        this.nextChallengeTime = Date.now() + 1000; // 1 second grace period before first challenge
         this.challenges = this.generateChallengeSequence(this.REQUIRED_CHALLENGES);
+        this.pitchHistory = [];
+        this.yawHistory = [];
 
         console.log(
             '[LivenessService] Session started. Challenges:',
@@ -115,6 +152,18 @@ export class LivenessService {
     }
 
     /**
+     * Helper to get a user-friendly instruction string for a challenge.
+     */
+    getInstructionForChallenge(challenge: LivenessChallenge): string {
+        switch (challenge.type) {
+            case 'BLINK': return 'Please blink your eyes';
+            case 'SMILE': return 'Please smile widely';
+            case 'HEAD_TURN': return 'Turn your head slightly left or right';
+            default: return 'Please look at the camera';
+        }
+    }
+
+    /**
      * Processes a set of per-frame biometric measurements and advances the
      * challenge state machine accordingly.
      *
@@ -129,8 +178,41 @@ export class LivenessService {
             return this.buildResult();
         }
 
+        // 1. Passive Liveness Check (Anti-Spoof Heuristics)
+        if (metrics.faceQuality < 0.6) {
+             // Face is too small, too far, or poorly aligned. Return early without advancing.
+             return this.buildResult();
+        }
+
+        this.pitchHistory.push(metrics.pitch);
+        this.yawHistory.push(metrics.yaw);
+        if (this.pitchHistory.length > this.PASSIVE_HISTORY_SIZE) {
+            this.pitchHistory.shift();
+            this.yawHistory.shift();
+        }
+
+        // Check for unnatural stillness (e.g. photo on a desk or static screen)
+        if (this.pitchHistory.length === this.PASSIVE_HISTORY_SIZE) {
+            const pitchVariance = this.calculateVariance(this.pitchHistory);
+            const yawVariance = this.calculateVariance(this.yawHistory);
+            
+            // Humans naturally micro-jitter. Variance < 0.02 is impossibly still
+            if (pitchVariance < 0.02 && yawVariance < 0.02) {
+                console.warn(`[LivenessService] SPOOF DETECTED: Unnatural stillness (PitchVar: ${pitchVariance.toFixed(4)}, YawVar: ${yawVariance.toFixed(4)})`);
+                this.sessionActive = false;
+                const result = this.buildResult();
+                result.failureReason = 'STATIC_SPOOF_DETECTED';
+                return result;
+            }
+        }
+
         const activeChallenge = this.getActiveChallenge();
         if (!activeChallenge) {
+            return this.buildResult();
+        }
+
+        // Delay evaluation to give user time to read the instruction
+        if (Date.now() < this.nextChallengeTime) {
             return this.buildResult();
         }
 
@@ -147,7 +229,7 @@ export class LivenessService {
         let passed = false;
         switch (activeChallenge.type) {
             case 'BLINK':
-                passed = this.evaluateBlink(metrics.ear);
+                passed = this.evaluateBlink(metrics.ear); // 'ear' in LivenessMetrics is repurposed for eye open probability average
                 break;
             case 'HEAD_TURN':
                 passed = this.evaluateHeadTurn(metrics.yaw, activeChallenge.direction);
@@ -162,6 +244,11 @@ export class LivenessService {
             this.activeChallengeIndex += 1;
             console.log('[LivenessService] Challenge passed:', activeChallenge.type);
 
+            this.nextChallengeTime = Date.now() + 1500;
+            if (this.activeChallengeIndex < this.challenges.length) {
+                this.challenges[this.activeChallengeIndex].issuedAt = this.nextChallengeTime;
+            }
+
             // All challenges completed — session succeeded
             if (this.activeChallengeIndex >= this.challenges.length) {
                 this.sessionActive = false;
@@ -172,78 +259,14 @@ export class LivenessService {
     }
 
     /**
-     * Extracts biometric signals from a raw FaceDetection object.
-     *
-     * Converts the BlazeFace 6-point landmark array into EAR, head pose,
-     * smile ratio, and face quality values compatible with processMeasurements().
-     *
-     * BlazeFace landmark order (0-indexed):
-     *   0 = Right eye centre
-     *   1 = Left eye centre
-     *   2 = Nose tip
-     *   3 = Mouth centre
-     *   4 = Right ear tragion (not always reliable — unused)
-     *   5 = Left ear tragion
-     *
-     * @param face        - The FaceDetection from FaceDetectorService
-     * @param frameWidth  - Width of the source camera frame in pixels
-     * @param frameHeight - Height of the source camera frame in pixels
-     * @returns LivenessMetrics ready for processMeasurements()
-     */
-    extractMetrics(
-        face: FaceDetection,
-        frameWidth: number,
-        frameHeight: number
-    ): LivenessMetrics {
-        const lm = face.landmarks;
-
-        // Gracefully handle cases where the detector returns fewer than 4 landmarks
-        const rightEye = lm[0] ?? { x: 0, y: 0 };
-        const leftEye  = lm[1] ?? { x: 0, y: 0 };
-        const nose     = lm[2] ?? { x: 0, y: 0 };
-        const mouth    = lm[3] ?? { x: 0, y: 0 };
-
-        // Face bounding-box dimensions
-        const faceWidth  = face.bbox.width;
-        const faceHeight = face.bbox.height;
-
-        // EAR estimation using BlazeFace eye centres.
-        // Open-eye height is modelled as 7% of face bbox height.
-        const openEyeHeight = faceHeight * 0.07;
-        const currentEyeGap = Math.abs(leftEye.y - rightEye.y) * 0.1; // scaled lateral gap proxy
-        const ear = estimateEARFromCentres(leftEye, rightEye, openEyeHeight, currentEyeGap);
-
-        // Head pose from 4 anchor landmarks
-        const { yaw, pitch, roll } = estimateHeadPose(
-            leftEye, rightEye, nose, mouth, faceWidth, faceHeight
-        );
-
-        // Smile: approximate left/right mouth corners from mouth centre + face width
-        const halfMouthWidth = faceWidth * 0.18;
-        const leftMouthCorner: Landmark  = { x: mouth.x - halfMouthWidth, y: mouth.y };
-        const rightMouthCorner: Landmark = { x: mouth.x + halfMouthWidth, y: mouth.y };
-        const upperLip: Landmark = { x: mouth.x, y: mouth.y - faceHeight * 0.04 };
-        const lowerLip: Landmark = { x: mouth.x, y: mouth.y + faceHeight * 0.04 };
-        const smileRatio = computeSmileRatio(leftMouthCorner, rightMouthCorner, upperLip, lowerLip);
-
-        // Quality score
-        const faceCentreX = face.bbox.xMin + faceWidth / 2;
-        const faceCentreY = face.bbox.yMin + faceHeight / 2;
-        const faceQuality = computeFaceQuality(
-            faceWidth, faceHeight, frameWidth, frameHeight, faceCentreX, faceCentreY
-        );
-
-        return { ear, yaw, pitch, roll, smileRatio, faceQuality };
-    }
-
-    /**
-     * Terminates the current session and returns the final result.
-     * Call this when the camera view is unmounted or auth is cancelled.
+     * Terminate session manually.
      */
     endSession(): LivenessResult {
         this.sessionActive = false;
         return this.buildResult();
     }
+
+
 
     /**
      * Evaluates the blink challenge using a two-state machine (closed → open).
@@ -257,10 +280,10 @@ export class LivenessService {
      * @param ear - Current Eye Aspect Ratio for this frame
      * @returns True if a complete blink was detected
      */
-    private evaluateBlink(ear: number): boolean {
-        if (!this.wasEyeClosed && ear < this.EAR_BLINK_THRESHOLD) {
+    private evaluateBlink(eyeOpenProb: number): boolean {
+        if (!this.wasEyeClosed && eyeOpenProb < this.EYE_CLOSED_THRESHOLD) {
             this.wasEyeClosed = true; // eye just closed
-        } else if (this.wasEyeClosed && ear > this.EAR_OPEN_THRESHOLD) {
+        } else if (this.wasEyeClosed && eyeOpenProb > this.EYE_OPEN_THRESHOLD) {
             this.wasEyeClosed = false; // eye just re-opened — blink complete!
             return true;
         }
@@ -275,9 +298,8 @@ export class LivenessService {
      * @returns True if yaw exceeds the threshold in the required direction
      */
     private evaluateHeadTurn(yaw: number, direction?: 'LEFT' | 'RIGHT'): boolean {
-        if (direction === 'LEFT')  return yaw < -this.YAW_TURN_THRESHOLD;
-        if (direction === 'RIGHT') return yaw >  this.YAW_TURN_THRESHOLD;
-        // Fallback: accept a turn in either direction
+        // Front cameras often mirror yaw inconsistently across Android devices.
+        // To be foolproof, we accept a turn in either direction.
         return Math.abs(yaw) > this.YAW_TURN_THRESHOLD;
     }
 
@@ -287,8 +309,8 @@ export class LivenessService {
      * @param smileRatio - Current mouth width-to-height ratio
      * @returns True if the smile ratio exceeds the threshold
      */
-    private evaluateSmile(smileRatio: number): boolean {
-        return smileRatio > this.SMILE_RATIO_THRESHOLD;
+    private evaluateSmile(smileProb: number): boolean {
+        return smileProb > this.SMILE_PROBABILITY_THRESHOLD;
     }
 
     /**
@@ -342,6 +364,16 @@ export class LivenessService {
             challenges: [...this.challenges],
             failureReason: hasFailed ? 'challenge_timeout_or_failure' : undefined,
         };
+    }
+
+    /**
+     * Calculates the sample variance of an array of numbers.
+     */
+    private calculateVariance(values: number[]): number {
+        if (values.length < 2) return 0;
+        const mean = values.reduce((a, b) => a + b, 0) / values.length;
+        const squareDiffs = values.map(v => Math.pow(v - mean, 2));
+        return squareDiffs.reduce((a, b) => a + b, 0) / (values.length - 1);
     }
 }
 

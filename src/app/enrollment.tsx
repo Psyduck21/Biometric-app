@@ -1,52 +1,41 @@
-import React, { useRef, useState, useEffect, useCallback } from 'react';
+import { router } from 'expo-router';
+import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
-  Animated,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
+  StatusBar,
   StyleSheet,
   Text,
   TextInput,
   View,
-  StatusBar,
-  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Camera, useCameraPermission, useCameraDevice, useFrameOutput } from 'react-native-vision-camera';
-import { useTensorflowModel } from 'react-native-fast-tflite';
-import { useResizer } from 'react-native-vision-camera-resizer';
-import { Worklets } from 'react-native-worklets-core';
-import { router } from 'expo-router';
-import { useAppDispatch } from '../store/hooks';
-import { setProfile } from '../store/slices/authSlices';
+import { T } from '../design-system/theme2';
 import { appSessionService } from '../services/AppSessionService';
 import { enrollmentService } from '../services/EnrollmentService';
-import { T } from '../design-system/theme2';
+import { useAppDispatch } from '../store/hooks';
+import { setProfile } from '../store/slices/authSlices';
+import BiometricScanner from '../components/BiometricScanner';
 
-import { processBlazeFaceOutput, generateAnchors } from '../services/ai/FaceDetectorService';
-import { calculateFaceCrop } from '../services/ai/FaceAlignmentService';
-import { processAntiSpoofingOutput } from '../services/ai/AntiSpoofingService';
-import { processEmbeddingOutput } from '../services/ai/EmbeddingService';
-
-type Stage = 'info' | 'capture' | 'success';
-
-const blazefaceAnchors = generateAnchors(128, 128);
+type Stage = 'info' | 'liveness' | 'capture' | 'success' | 'failed';
 
 // ── Step indicator ─────────────────────────────────────────────────────────
 function StepRow({ current }: { current: number }) {
-  const labels = ['Profile', 'Face scan', 'Done'];
+  const labels = ['Profile', 'Liveness', 'Face scan'];
   return (
     <View style={s.stepRow}>
       {labels.map((label, i) => {
-        const done   = i < current;
+        const done = i < current;
         const active = i === current;
         return (
           <React.Fragment key={label}>
             <View style={s.stepItem}>
               <View style={[
                 s.stepDot,
-                done   && s.stepDotDone,
+                done && s.stepDotDone,
                 active && s.stepDotActive,
               ]}>
                 {done ? (
@@ -67,65 +56,20 @@ function StepRow({ current }: { current: number }) {
   );
 }
 
-// ── Face scan overlay ──────────────────────────────────────────────────────
-function FaceOverlay({ captured, required }: { captured: number; required: number }) {
-  const pct = (captured / required) * 100;
-  return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* corner brackets */}
-      {(['TL','TR','BL','BR'] as const).map(pos => (
-        <View key={pos} style={[s.bracket, s[`bracket${pos}` as keyof typeof s] as any]} />
-      ))}
-      {/* Progress arc indicator at top */}
-      <View style={s.progressPill}>
-        <View style={[s.progressFill, { width: `${pct}%` as any }]} />
-        <Text style={s.progressText}>{captured}/{required}</Text>
-      </View>
-      {/* Center circle guide */}
-      <View style={s.centerCircle} />
-    </View>
-  );
-}
-
 // ── Main component ─────────────────────────────────────────────────────────
 export default function EnrollmentScreen() {
-  const dispatch   = useAppDispatch();
-  const { hasPermission, requestPermission } = useCameraPermission();
-  const device = useCameraDevice('front');
+  const dispatch = useAppDispatch();
 
-  // Load Models
-  const { resizer: blazeResizer } = useResizer({
-    width: 128,
-    height: 128,
-    channelOrder: 'rgb',
-    dataType: 'float32',
-    scaleMode: 'cover',
-    pixelLayout: 'interleaved'
-  });
-  const { resizer: faceResizer } = useResizer({
-    width: 112,
-    height: 112,
-    channelOrder: 'rgb',
-    dataType: 'float32',
-    scaleMode: 'cover',
-    pixelLayout: 'interleaved'
-  });
-  const blazeface = useTensorflowModel(require('../../assets/models/blazeface/blazeface.tflite'), []);
-  const antispoofing = useTensorflowModel(require('../../assets/models/antispoofing/2.7_80x80_MiniFASNetV2.tflite'), []);
-  const mobilefacenet = useTensorflowModel(require('../../assets/models/mobilefacenet/mobilefacenet.tflite'), []);
-
-  const [stage, setStage]         = useState<Stage>('info');
-  const [fullName, setFullName]   = useState('');
-  const [employeeId, setEmpId]    = useState('');
-  const [email, setEmail]         = useState('');
+  const [stage, setStage] = useState<Stage>('info');
+  const [fullName, setFullName] = useState('');
+  const [employeeId, setEmpId] = useState('');
+  const [email, setEmail] = useState('');
+  const [profileId, setProfileId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [captured, setCaptured]   = useState(0);
-  const [required, setRequired]   = useState(5);
-  const [busy, setBusy]           = useState(false);
-  const [error, setError]         = useState<string | null>(null);
-
-  // Throttling state for JS
-  const lastCaptureTime = useRef<number>(0);
+  const [captured, setCaptured] = useState(0);
+  const [required, setRequired] = useState(5);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // ── Step 1 submit ──────────────────────────────────────────────────────
   const handleContinue = async () => {
@@ -137,12 +81,13 @@ export default function EnrollmentScreen() {
     try {
       const user = await appSessionService.registerUser({ fullName, employeeId, email });
       dispatch(setProfile(user));
+      setProfileId(user.id);
+      
       const session = await enrollmentService.startEnrollment(user.id);
       setSessionId(session.sessionId);
       setRequired(session.requiredSamples);
       setCaptured(session.capturedSamples);
-      setStage('capture');
-      lastCaptureTime.current = Date.now();
+      setStage('liveness');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create profile.');
     } finally {
@@ -153,18 +98,7 @@ export default function EnrollmentScreen() {
   // ── Step 2 Automatic Capture ───────────────────────────────────────────
   const onValidFrame = useCallback(async (embedding: Float32Array, confidence: number) => {
     if (stage !== 'capture' || !sessionId) return;
-
-    const now = Date.now();
-    if (now - lastCaptureTime.current < 800) { // Wait 800ms between captures to allow slight head movement
-      return;
-    }
-
-    if (captured >= required) return;
-
-    lastCaptureTime.current = now;
-    
     try {
-      // Pass empty string for alignedFrame as it's not saved to disk
       const updated = await enrollmentService.addSample(sessionId, "" as any, embedding, confidence);
       setCaptured(updated.capturedSamples);
 
@@ -174,64 +108,19 @@ export default function EnrollmentScreen() {
         setStage('success');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Capture failed.');
-    }
-  }, [stage, sessionId, captured, required]);
-
-  const runJSOnFrame = Worklets.createRunOnJS(onValidFrame);
-  const isProcessing = Worklets.createSharedValue(false);
-
-  const frameOutput = useFrameOutput({
-  onFrame: (frame) => {
-    'worklet';
-    if (stage !== 'capture' || isProcessing.value) return;
-    if (!blazeface.model || !antispoofing.model || !mobilefacenet.model) return;
-
-    isProcessing.value = true;
-
-    
-      try {
-        if (!blazeResizer || !faceResizer) return;
-        const blazeFrame = blazeResizer.resize(frame);
-        
-        const bfArray = new Float32Array(blazeFrame.getPixelBuffer());
-        blazeFrame.dispose();
-        for (let i = 0; i < bfArray.length; i++) {
-          bfArray[i] = (bfArray[i] / 127.5) - 1.0;
-        }
-
-        const bfOutput = blazeface.model!.runSync([bfArray.buffer as ArrayBuffer]);
-        const rawOutput = new Float32Array(bfOutput[0]);
-        const detection = processBlazeFaceOutput(rawOutput, blazefaceAnchors, frame.width, frame.height);
-        
-        if (detection.faces.length > 0) {
-          const face = detection.faces[0];
-          // Using Option 1: Full-Frame Scaling
-          const faceCropFrame = faceResizer.resize(frame);
-          const fmArray = new Float32Array(faceCropFrame.getPixelBuffer());
-          faceCropFrame.dispose();
-          for (let i = 0; i < fmArray.length; i++) {
-            fmArray[i] = (fmArray[i] / 127.5) - 1.0;
-          }
-
-          const spoofOutput = antispoofing.model!.runSync([fmArray.buffer as ArrayBuffer]);
-          const spoofResult = processAntiSpoofingOutput(new Float32Array(spoofOutput[0]));
-          
-          if (spoofResult.isRealFace) {
-            const embedOutput = mobilefacenet.model!.runSync([fmArray.buffer as ArrayBuffer]);
-            const embedding = processEmbeddingOutput(new Float32Array(embedOutput[0]));
-            runJSOnFrame(embedding, spoofResult.confidence);
-          }
-        }
-      } catch (e) {
-        console.error('Frame Processor Error', e);
-      } finally {
-        isProcessing.value = false;
+      const msg = e instanceof Error ? e.message : 'Capture failed.';
+      setError(`${msg} Retrying...`);
+      setCaptured(0);
+      
+      if (profileId) {
+        enrollmentService.startEnrollment(profileId)
+          .then(newSession => setSessionId(newSession.sessionId))
+          .catch(err => setError('Failed to restart session. Please go back.'));
       }
-  }
-  });
+    }
+  }, [stage, sessionId, profileId]);
 
-  const stageIndex = stage === 'info' ? 0 : stage === 'capture' ? 1 : 2;
+  const stageIndex = stage === 'info' ? 0 : stage === 'liveness' ? 1 : stage === 'capture' ? 2 : 3;
 
   return (
     <SafeAreaView style={s.root}>
@@ -311,56 +200,17 @@ export default function EnrollmentScreen() {
         </KeyboardAvoidingView>
       )}
 
-      {/* ── Stage: Capture ──────────────────────────────────────────── */}
-      {stage === 'capture' && (
-        <View style={{ flex: 1 }}>
-          {!hasPermission ? (
-            <View style={s.permBox}>
-              <Text style={s.permTitle}>Camera access needed</Text>
-              <Text style={s.permSub}>We use the front camera only for face enrollment.</Text>
-              <Pressable style={s.btnPrimary} onPress={() => requestPermission()}>
-                <Text style={s.btnPrimaryText}>Allow camera</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={{ flex: 1 }}>
-              <View style={s.cameraWrap}>
-                {device && (
-                  <Camera 
-                    style={StyleSheet.absoluteFill} 
-                    device={device} 
-                    isActive={true} 
-                    outputs={[frameOutput]}
-                    
-                  />
-                )}
-                <FaceOverlay captured={captured} required={required} />
-              </View>
-
-              <View style={s.captureBar}>
-                <View>
-                  <Text style={s.captureTitle}>
-                    Capture {captured} of {required}
-                  </Text>
-                  <Text style={s.captureSub}>
-                    {captured === 0
-                      ? 'Face the camera straight on.'
-                      : captured < 3
-                      ? 'Slowly turn your head left or right.'
-                      : 'Almost done — slightly tilt your head.'}
-                  </Text>
-                </View>
-                {error ? <Text style={s.errorText}>{error}</Text> : null}
-                
-                {/* Auto Capture Indicator */}
-                <View style={s.autoCaptureIndicator}>
-                  <ActivityIndicator color={T.yellow} size="small" />
-                  <Text style={s.autoCaptureText}>Auto-capturing frames...</Text>
-                </View>
-              </View>
-            </View>
-          )}
-        </View>
+      {/* ── Stage: Liveness & Capture ──────────────────────────────────────────── */}
+      {(stage === 'liveness' || stage === 'capture') && (
+        <BiometricScanner
+          mode="enrollment"
+          stage={stage}
+          captured={captured}
+          requiredCaptures={required}
+          error={error}
+          onLivenessPassed={() => setStage('capture')}
+          onCapture={onValidFrame}
+        />
       )}
 
       {/* ── Stage: Success ──────────────────────────────────────────── */}
@@ -374,10 +224,10 @@ export default function EnrollmentScreen() {
             Your face templates are encrypted and saved securely on this device.
           </Text>
           <Pressable
-            style={({ pressed }) => [s.btnPrimary, pressed && s.btnPressed]}
-            onPress={() => router.replace('/scanner')}
+            style={({ pressed }) => [s.btnPrimary, pressed && s.btnPressed, { marginTop: 24 }]}
+            onPress={() => router.replace('/home')}
           >
-            <Text style={s.btnPrimaryText}>Continue to sign in →</Text>
+            <Text style={s.btnPrimaryText}>Go to Dashboard</Text>
           </Pressable>
         </View>
       )}
@@ -385,82 +235,47 @@ export default function EnrollmentScreen() {
   );
 }
 
-const BRACKET_T = 3;
-const BRACKET_L = 22;
-
 const s = StyleSheet.create({
-  root:          { flex: 1, backgroundColor: T.white },
-  topBar:        { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: T.sp16, paddingTop: T.sp8, paddingBottom: T.sp4 },
-  backBtn:       { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  backArrow:     { fontSize: T.fs20, color: T.black },
-  screenTitle:   { fontSize: T.fs16, fontWeight: '700', color: T.black, fontFamily: T.font, letterSpacing: 0.3 },
+  root: { flex: 1, backgroundColor: T.white },
+  topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: T.sp16, paddingVertical: T.sp12, borderBottomWidth: 1, borderColor: T.divider },
+  backBtn: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
+  backArrow: { fontSize: 24, color: T.black },
+  screenTitle: { fontSize: T.fs18, fontWeight: '700', color: T.black, fontFamily: T.font },
+  divider: { height: 1, backgroundColor: T.divider },
 
-  // Step row
-  stepRow:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: T.sp24, paddingVertical: T.sp16 },
-  stepItem:      { alignItems: 'center', gap: T.sp6 },
-  stepLine:      { flex: 1, height: 1, backgroundColor: T.hairline, marginBottom: T.sp20 },
-  stepLineDone:  { backgroundColor: T.yellow },
-  stepDot:       { width: 28, height: 28, borderRadius: 14, borderWidth: 1.5, borderColor: T.hairline, alignItems: 'center', justifyContent: 'center', backgroundColor: T.white },
-  stepDotDone:   { backgroundColor: T.yellow, borderColor: T.yellow },
-  stepDotActive: { borderColor: T.black, borderWidth: 2 },
-  stepNum:       { fontSize: T.fs12, color: T.muted, fontFamily: T.font },
-  stepNumActive: { color: T.black, fontWeight: '700' },
-  stepCheck:     { fontSize: T.fs12, fontWeight: '700', color: T.black },
-  stepLabel:     { fontSize: T.fs10, color: T.muted, fontFamily: T.font, letterSpacing: 0.3 },
-  stepLabelActive: { color: T.black, fontWeight: '600' },
+  stepRow: { flexDirection: 'row', paddingHorizontal: T.sp32, paddingVertical: T.sp16, justifyContent: 'space-between', alignItems: 'center' },
+  stepItem: { alignItems: 'center', gap: T.sp4 },
+  stepDot: { width: 24, height: 24, borderRadius: 12, backgroundColor: T.divider, alignItems: 'center', justifyContent: 'center' },
+  stepDotActive: { backgroundColor: T.black },
+  stepDotDone: { backgroundColor: T.yellow },
+  stepCheck: { color: T.white, fontSize: T.fs13, fontWeight: '700' },
+  stepNum: { color: T.muted, fontSize: T.fs13, fontWeight: '600', fontFamily: T.font },
+  stepNumActive: { color: T.white },
+  stepLabel: { fontSize: T.fs12, color: T.muted, fontFamily: T.font, fontWeight: '500' },
+  stepLabelActive: { color: T.black, fontWeight: '700' },
+  stepLine: { flex: 1, height: 2, backgroundColor: T.divider, marginHorizontal: T.sp8, marginTop: -16 },
+  stepLineDone: { backgroundColor: T.yellow },
 
-  divider:       { height: 1, backgroundColor: T.hairline },
+  infoScroll: { padding: T.sp24, paddingBottom: T.sp48, gap: T.sp20 },
+  stageHeading: { fontSize: T.fs24, fontWeight: '700', color: T.black, fontFamily: T.font },
+  stageSub: { fontSize: T.fs14, color: T.muted, fontFamily: T.font, lineHeight: 20 },
 
-  // Info stage
-  infoScroll:    { padding: T.sp24, gap: T.sp20 },
-  stageHeading:  { fontSize: T.fs28, fontWeight: '700', color: T.black, fontFamily: T.font, lineHeight: 34 },
-  stageSub:      { fontSize: T.fs14, color: T.muted, fontFamily: T.font, lineHeight: 22, marginTop: -T.sp8 },
-  fieldGroup:    { gap: T.sp6 },
-  fieldLabel:    { fontSize: T.fs12, fontWeight: '600', color: T.charcoal, fontFamily: T.font, letterSpacing: 0.3, textTransform: 'uppercase' },
-  fieldInput:    {
-    height: 52, borderWidth: 1.5, borderColor: T.hairline, borderRadius: T.r8,
-    paddingHorizontal: T.sp16, fontSize: T.fs16, color: T.black, fontFamily: T.font,
-    backgroundColor: T.offWhite,
-  },
+  fieldGroup: { gap: T.sp8 },
+  fieldLabel: { fontSize: T.fs13, fontWeight: '600', color: T.black, fontFamily: T.font },
+  fieldInput: { borderWidth: 1, borderColor: T.divider, borderRadius: T.r8, padding: T.sp12, fontSize: T.fs16, color: T.black, fontFamily: T.font, backgroundColor: T.white },
 
-  // Buttons
-  btnPrimary:    { height: 56, backgroundColor: T.yellow, borderRadius: T.r12, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: T.yellowDark },
-  btnPressed:    { opacity: 0.88 },
-  btnDisabled:   { opacity: 0.5 },
-  btnPrimaryText:{ fontSize: T.fs16, fontWeight: '700', color: T.black, fontFamily: T.font },
-  linkBtn:       { alignItems: 'center', paddingVertical: T.sp8 },
-  linkText:      { fontSize: T.fs13, color: T.muted, fontFamily: T.font, textDecorationLine: 'underline' },
+  btnPrimary: { backgroundColor: T.yellow, paddingVertical: T.sp16, borderRadius: T.r8, alignItems: 'center', justifyContent: 'center', marginTop: T.sp8, borderWidth: 1.5, borderColor: T.yellowDark },
+  btnPressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
+  btnDisabled: { opacity: 0.5 },
+  btnPrimaryText: { fontSize: T.fs16, fontWeight: '700', color: T.black, fontFamily: T.font },
+  linkBtn: { alignItems: 'center', paddingVertical: T.sp8 },
+  linkText: { fontSize: T.fs13, color: T.muted, fontFamily: T.font, textDecorationLine: 'underline' },
 
-  errorText:     { fontSize: T.fs13, color: T.error, fontFamily: T.font },
+  errorText: { fontSize: T.fs13, color: T.error, fontFamily: T.font },
 
-  // Permission
-  permBox:       { flex: 1, alignItems: 'center', justifyContent: 'center', padding: T.sp32, gap: T.sp16 },
-  permTitle:     { fontSize: T.fs20, fontWeight: '700', color: T.black, fontFamily: T.font, textAlign: 'center' },
-  permSub:       { fontSize: T.fs14, color: T.muted, fontFamily: T.font, textAlign: 'center', lineHeight: 22 },
-
-  // Camera
-  cameraWrap:    { flex: 1, backgroundColor: T.black, position: 'relative' },
-  bracket:       { position: 'absolute', width: BRACKET_L, height: BRACKET_L },
-  bracketTL:     { top: 40, left: '50%', marginLeft: -90, borderTopWidth: BRACKET_T, borderLeftWidth: BRACKET_T, borderColor: T.yellow, borderTopLeftRadius: T.r6 },
-  bracketTR:     { top: 40, right: '50%', marginRight: -90, borderTopWidth: BRACKET_T, borderRightWidth: BRACKET_T, borderColor: T.yellow, borderTopRightRadius: T.r6 },
-  bracketBL:     { bottom: 0, left: '50%', marginLeft: -90, borderBottomWidth: BRACKET_T, borderLeftWidth: BRACKET_T, borderColor: T.yellow, borderBottomLeftRadius: T.r6 },
-  bracketBR:     { bottom: 0, right: '50%', marginRight: -90, borderBottomWidth: BRACKET_T, borderRightWidth: BRACKET_T, borderColor: T.yellow, borderBottomRightRadius: T.r6 },
-  progressPill:  { position: 'absolute', top: 16, alignSelf: 'center', width: 120, height: 20, backgroundColor: 'rgba(0,0,0,0.5)', borderRadius: 10, overflow: 'hidden', justifyContent: 'center', alignItems: 'center' },
-  progressFill:  { position: 'absolute', left: 0, top: 0, bottom: 0, backgroundColor: T.yellow, borderRadius: 10 },
-  progressText:  { fontSize: T.fs11, color: T.white, fontWeight: '700', fontFamily: T.font, zIndex: 1 },
-  centerCircle:  { position: 'absolute', top: '50%', alignSelf: 'center', marginTop: -80, width: 180, height: 210, borderRadius: 90, borderWidth: 1.5, borderColor: 'rgba(245,197,24,0.6)', borderStyle: 'dashed' },
-
-  captureBar:    { backgroundColor: T.white, padding: T.sp24, paddingBottom: T.sp32, gap: T.sp16 },
-  captureTitle:  { fontSize: T.fs20, fontWeight: '700', color: T.black, fontFamily: T.font },
-  captureSub:    { fontSize: T.fs13, color: T.muted, fontFamily: T.font },
-  
-  autoCaptureIndicator: { flexDirection: 'row', alignItems: 'center', gap: T.sp8, backgroundColor: T.offWhite, padding: T.sp12, borderRadius: T.r8, alignSelf: 'flex-start' },
-  autoCaptureText: { fontSize: T.fs12, color: T.muted, fontFamily: T.font, fontWeight: '600' },
-
-  // Success
-  successBox:    { flex: 1, alignItems: 'center', justifyContent: 'center', padding: T.sp32, gap: T.sp20 },
-  successIcon:   { width: 80, height: 80, borderRadius: 40, backgroundColor: T.yellow, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: T.yellowDark },
-  successCheck:  { fontSize: T.fs32, fontWeight: '700', color: T.black },
-  successHeading:{ fontSize: T.fs32, fontWeight: '700', color: T.black, fontFamily: T.font },
-  successSub:    { fontSize: T.fs14, color: T.muted, fontFamily: T.font, textAlign: 'center', lineHeight: 22 },
+  successBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: T.sp32, gap: T.sp20 },
+  successIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: T.yellow, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: T.yellowDark },
+  successCheck: { fontSize: T.fs32, fontWeight: '700', color: T.black },
+  successHeading: { fontSize: T.fs32, fontWeight: '700', color: T.black, fontFamily: T.font },
+  successSub: { fontSize: T.fs14, color: T.muted, fontFamily: T.font, textAlign: 'center', lineHeight: 22 },
 });

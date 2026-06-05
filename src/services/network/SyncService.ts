@@ -1,8 +1,24 @@
 import NetInfo, { NetInfoState, NetInfoSubscription } from '@react-native-community/netinfo';
+import { AppState, AppStateStatus } from 'react-native';
+import * as BackgroundFetch from 'expo-background-fetch';
+import * as TaskManager from 'expo-task-manager';
 import { SyncQueueRepository } from '../../database/repositories/SyncQueueRepository';
 import { CryptoService } from '../CryptoService';
 import { apiService } from './ApiService';
 import { SyncQueueItem } from '../../types/domain';
+
+const BACKGROUND_SYNC_TASK = 'background-sync-task';
+
+TaskManager.defineTask(BACKGROUND_SYNC_TASK, async () => {
+    try {
+        console.log('[BackgroundFetch] Running background sync task...');
+        await syncService.syncBatch();
+        return BackgroundFetch.BackgroundFetchResult.NewData;
+    } catch (error) {
+        console.error('[BackgroundFetch] Failed to sync in background', error);
+        return BackgroundFetch.BackgroundFetchResult.Failed;
+    }
+});
 
 export class SyncService {
     private isRunning = false;
@@ -20,6 +36,26 @@ export class SyncService {
     async startSyncLoop(): Promise<void> {
         if (this.isRunning) return;
         this.isRunning = true;
+
+        // Register background fetch
+        try {
+            await BackgroundFetch.registerTaskAsync(BACKGROUND_SYNC_TASK, {
+                minimumInterval: 15 * 60, // 15 minutes
+                stopOnTerminate: false,
+                startOnBoot: true,
+            });
+            console.log('[SyncService] Background fetch registered.');
+        } catch (err) {
+            console.error('[SyncService] Failed to register background fetch', err);
+        }
+
+        // Monitor AppState to trigger eager sync when foregrounded
+        AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+            if (nextAppState === 'active' && this.isOnline) {
+                console.log('[SyncService] App foregrounded. Triggering immediate sync.');
+                this.syncBatch();
+            }
+        });
 
         // Monitor Network Connectivity
         this.netInfoUnsubscribe = NetInfo.addEventListener((state: NetInfoState) => {
@@ -130,12 +166,25 @@ export class SyncService {
 
             // 3. Handle Success & Failures
             if (response.success) {
-                const successfullyProcessedKeys = response.data?.processed?.length
-                    ? response.data.processed
-                    : decryptedItems.map(i => i.idempotency_key);
+                const successfullyProcessedKeys = response.data?.processed || [];
+                const failedKeys = response.data?.failed || [];
 
-                await SyncQueueRepository.markSynced(successfullyProcessedKeys, Date.now());
-                console.log(`[SyncService] Successfully synced ${successfullyProcessedKeys.length} items.`);
+                if (successfullyProcessedKeys.length > 0) {
+                    await SyncQueueRepository.markSynced(successfullyProcessedKeys, Date.now());
+                    console.log(`[SyncService] Successfully synced ${successfullyProcessedKeys.length} items.`);
+                }
+
+                if (failedKeys.length > 0) {
+                    for (const failedItem of failedKeys) {
+                        const key = typeof failedItem === 'string' ? failedItem : failedItem.key;
+                        const errorMsg = typeof failedItem === 'string' ? 'Server rejected sync item' : failedItem.error;
+                        
+                        const queueItem = pendingItems.find(i => i.idempotency_key === key);
+                        if (queueItem) {
+                            await this.handleSyncFailure(queueItem, errorMsg);
+                        }
+                    }
+                }
             } else {
                 console.warn(`[SyncService] API Error: ${response.error}`);
                 for (const item of pendingItems) {

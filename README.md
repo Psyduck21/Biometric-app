@@ -1,50 +1,67 @@
-# Welcome to your Expo app 👋
+# Aegis
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+**Enterprise Biometric Authentication & Attendance Platform**
 
-## Get started
+Aegis is an offline-first, high-security biometric attendance system designed for remote and disconnected environments. It leverages on-device Machine Learning (MobileFaceNet & MiniFASNet) to provide instantaneous identity verification without requiring an active internet connection.
 
-1. Install dependencies
+## Features
+* **Face Recognition:** On-device 512-dimensional facial embedding generation via Fast TFLite.
+* **Active Liveness:** Challenge-response system requiring blinks, smiles, and head turns.
+* **Passive Anti-Spoofing:** Depth and texture analysis to prevent photo/screen replay attacks.
+* **Device Binding:** ECDSA P-256 cryptographic signatures bind attendance records to specific hardware.
+* **Offline Authentication:** Encrypted SQLite template storage for clocking in without a network.
+* **Background Sync:** Automatic exponential backoff queue for uploading attendance records natively via Expo Background Fetch.
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+## Architecture Diagram
+```text
+Camera
+   ↓
+Face Detection (MediaPipe)
+   ↓
+Liveness Challenge Engine
+   ↓
+Passive Anti-Spoof (MiniFASNet)
+   ↓
+Alignment & Cropping
+   ↓
+Embedding (MobileFaceNet)
+   ↓
+Authentication (AES-256-GCM Decryption & Cosine Similarity)
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Technology Stack
+- **Framework:** React Native 0.81 (New Architecture) & Expo SDK 54
+- **Computer Vision:** Vision Camera v5 (Nitro Modules)
+- **Machine Learning:** React Native Fast TFLite & MediaPipe Face Detection
+- **Database:** OP-SQLite
+- **Backend:** Supabase (PostgreSQL)
 
-## Learn more
+## Installation & Setup
+1. Clone the repository
+2. Run `npm install`
+3. Setup your `.env` with:
+   - `EXPO_PUBLIC_SUPABASE_PROJECT_URL`
+   - `EXPO_PUBLIC_SUPABASE_API_KEY`
 
-To learn more about developing your project with Expo, look at the following resources:
+## Running Development Build
+```bash
+npx expo run:android
+# OR
+npx expo run:ios
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Building Production App
+```bash
+eas build --platform android --profile production
+```
 
-## Join the community
+## Security Architecture
+Aegis does not store raw images. Facial data is immediately converted into an irreversible mathematical embedding array. This array is encrypted locally using AES-256-GCM, with the decryption key locked safely inside the hardware-backed Android Keystore / iOS Secure Enclave via `react-native-keychain`.
 
-Join our community of developers creating universal apps.
+## Known Limitations
+* **OTA Updates:** Because the ML models are bundled natively via `assetBundlePatterns`, OTA updates that change `.tflite` files require a strict `runtimeVersion` bump and a new native build.
+* **Background Sync:** Background sync on Android is subject to OEM Battery Manager restrictions (e.g. Samsung Doze). To mitigate this, `AppState` listeners trigger immediate syncs when the app is foregrounded.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Future Improvements
+* Cloud-based template invalidation and ECDSA key rotation.
+* Support for Iris scanning as an additional biometric modality.
