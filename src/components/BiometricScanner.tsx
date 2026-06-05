@@ -11,6 +11,7 @@ import { useTensorflowModel } from 'react-native-fast-tflite';
 import { Camera, useCameraDevice, useCameraPermission, useFrameOutput } from 'react-native-vision-camera';
 import { useResizer } from 'react-native-vision-camera-resizer';
 import { createSynchronizable, runOnJS } from 'react-native-worklets';
+import { useSharedValue } from 'react-native-reanimated';
 import { useFaceDetector } from 'react-native-vision-camera-face-detector';
 
 import { T } from '../design-system/theme2';
@@ -101,16 +102,16 @@ export default function BiometricScanner({
   // Processing state
   const isCapturing = useRef(createSynchronizable(false)).current;
   const isProcessing = useRef(createSynchronizable(false)).current;
-  const lastCaptureTime = useRef<number>(0);
+  const lastCaptureTime = useSharedValue<number>(0);
 
   // Ensure liveness starts when stage changes to liveness
   useEffect(() => {
     if (stage === 'liveness') {
       livenessService.startSession();
       // Delay initial capture to avoid instant captures
-      lastCaptureTime.current = Date.now() + 2000;
+      lastCaptureTime.value = Date.now() + 2000;
     } else if (stage === 'capture') {
-      lastCaptureTime.current = Date.now();
+      lastCaptureTime.value = Date.now();
     }
   }, [stage]);
 
@@ -160,14 +161,14 @@ export default function BiometricScanner({
       const now = Date.now();
       
       // Global frame throttling (~15 FPS) to prevent thermal overload and battery drain
-      if (stage === 'liveness' && now - lastCaptureTime.current < 66) {
+      if (stage === 'liveness' && now - lastCaptureTime.value < 66) {
         frame.dispose();
         return;
       }
 
       // Throttle captures to 800ms
       if (stage === 'capture') {
-        if (now - lastCaptureTime.current < 800) {
+        if (now - lastCaptureTime.value < 800) {
           frame.dispose();
           return;
         }
@@ -218,12 +219,12 @@ export default function BiometricScanner({
 
         if (stage === 'liveness') {
           // Update capture timestamp for FPS throttling
-          lastCaptureTime.current = Date.now();
+          lastCaptureTime.value = Date.now();
           const metrics = extractLivenessMetrics(face, frame.width, frame.height);
           runOnJS(handleLivenessMetrics)(metrics);
         } else if (stage === 'capture') {
           // Update capture timestamp immediately
-          lastCaptureTime.current = Date.now();
+          lastCaptureTime.value = Date.now();
 
           // AntiSpoofing
           const smArray = cropAndScaleTensor(baseRaw, 512, 512, mappedX, mappedY, mappedW, mappedH, 80, 80, '[0, 255]');

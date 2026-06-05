@@ -4,6 +4,7 @@ import { auditService } from './AuditService';
 import { deviceBindingService } from './DeviceBindingService';
 import { AttendanceRepository } from '../database/repositories/AttendanceRepository';
 import { SyncQueueRepository } from '../database/repositories/SyncQueueRepository';
+import { apiService } from './network/ApiService';
 import { Session, AttendanceEventType, AttendanceRecord, SyncQueueItem } from '../types/domain';
 
 export class AttendanceService {
@@ -118,6 +119,44 @@ export class AttendanceService {
         };
 
         await SyncQueueRepository.insert(syncItem);
+    }
+    /**
+     * Syncs historical attendance data for a specific month from the cloud.
+     * Caches the results locally via upsertBatch to prevent redundant API calls.
+     * 
+     * @param userId The user ID
+     * @param year The year (e.g., 2026)
+     * @param month The 0-indexed month (0 = Jan, 11 = Dec)
+     */
+    async syncHistoricalMonth(userId: string, year: number, month: number): Promise<void> {
+        // Calculate the epoch timestamp for the start and end of the requested month
+        const startOfMonth = new Date(year, month, 1).getTime();
+        const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+
+        try {
+            console.log(`[AttendanceService] Syncing historical month ${month + 1}/${year}`);
+            
+            // Assuming Supabase REST endpoint for 'attendance' table
+            const endpoint = `/attendance?select=*&user_id=eq.${userId}&timestamp=gte.${startOfMonth}&timestamp=lte.${endOfMonth}`;
+            
+            const response = await apiService.get<AttendanceRecord[]>(endpoint);
+            
+            if (response.success && response.data && response.data.length > 0) {
+                const records = response.data.map(r => ({
+                    ...r,
+                    sync_status: 'synced' as const
+                }));
+                
+                await AttendanceRepository.upsertBatch(records);
+                console.log(`[AttendanceService] Cached ${records.length} historical records for month ${month + 1}/${year}`);
+            } else if (!response.success) {
+                console.warn('[AttendanceService] Failed to fetch historical month:', response.error);
+            } else {
+                console.log(`[AttendanceService] No historical records found for month ${month + 1}/${year}`);
+            }
+        } catch (error) {
+            console.error('[AttendanceService] Exception while syncing historical month:', error);
+        }
     }
 }
 

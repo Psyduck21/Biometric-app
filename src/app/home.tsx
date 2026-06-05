@@ -8,9 +8,10 @@ import {
   View,
   StatusBar,
   Modal,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { useSelector } from 'react-redux';
 import * as Location from 'expo-location';
 import { useAppDispatch } from '../store/hooks';
@@ -22,6 +23,7 @@ import { AttendanceRecord } from '../types/domain';
 import { AttendanceRepository } from '../database/repositories/AttendanceRepository';
 import { SessionRepository } from '../database/repositories/SessionRepository';
 import { attendanceService } from '../services/AttendanceService';
+import { Calendar } from '../components/Calendar';
 
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
@@ -138,10 +140,29 @@ export default function DashboardScreen() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [records, setRecords]       = useState<AttendanceRecord[]>([]);
   const [locationLabel, setLocLabel]= useState('Fetching location…');
+  
+  // Historical state
+  const [activeTab, setActiveTab]   = useState<'today' | 'history'>('today');
+  const [historicalRecords, setHistoricalRecords] = useState<AttendanceRecord[]>([]);
+  const [markedDates, setMarkedDates] = useState<number[]>([]);
+  const [selectedDate, setSelectedDate] = useState<number>(Date.now());
+  const [isSyncingHistory, setIsSyncingHistory] = useState(false);
 
   const { justAuthenticated } = useLocalSearchParams<{ justAuthenticated?: string }>();
 
   const fadeIn = useRef(new Animated.Value(0)).current;
+
+  // Intercept Android hardware back button to exit app instead of going to login
+  useFocusEffect(
+    React.useCallback(() => {
+      const onBackPress = () => {
+        BackHandler.exitApp();
+        return true;
+      };
+      const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+      return () => subscription.remove();
+    }, [])
+  );
 
   // Load saved attendance records from the local database
   const loadRecords = async () => {
@@ -151,6 +172,52 @@ export default function DashboardScreen() {
       setRecords(todayRecords);
     } catch (e) {
       console.warn('Failed to load attendance records:', e);
+    }
+  };
+
+  const loadHistoricalDay = async (dateTs: number) => {
+    if (!currentUser) return;
+    try {
+      const startOfDay = new Date(dateTs);
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date(dateTs);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      const dayRecords = await AttendanceRepository.getAttendanceByDateRange(
+        currentUser.id,
+        startOfDay.getTime(),
+        endOfDay.getTime()
+      );
+      setHistoricalRecords(dayRecords);
+    } catch (e) {
+      console.warn('Failed to load historical day:', e);
+    }
+  };
+
+  const handleMonthChange = async (year: number, month: number) => {
+    if (!currentUser) return;
+    setIsSyncingHistory(true);
+    try {
+      // 1. Sync cloud
+      await attendanceService.syncHistoricalMonth(currentUser.id, year, month);
+      
+      // 2. Fetch all records for this month to populate marked dots
+      const startOfMonth = new Date(year, month, 1).getTime();
+      const endOfMonth = new Date(year, month + 1, 0, 23, 59, 59, 999).getTime();
+      const monthRecords = await AttendanceRepository.getAttendanceByDateRange(
+        currentUser.id,
+        startOfMonth,
+        endOfMonth
+      );
+      
+      setMarkedDates(monthRecords.map(r => r.timestamp));
+      
+      // Reload selected day just in case it was updated by the sync
+      loadHistoricalDay(selectedDate);
+    } catch (e) {
+      console.error('Failed to sync month:', e);
+    } finally {
+      setIsSyncingHistory(false);
     }
   };
 
@@ -262,78 +329,128 @@ export default function DashboardScreen() {
       <Animated.View style={[{ flex: 1 }, { opacity: fadeIn }]}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-          {/* ── Today card ── */}
-          <View style={s.todayCard}>
-            <View style={s.todayLeft}>
-              <Text style={s.todayLabel}>Today</Text>
-              <Text style={s.todayDate}>{formatDate(Date.now())}</Text>
-            </View>
-            <View style={s.todayRight}>
-              <View style={s.statusPill}>
-                <View style={[s.statusDot, { backgroundColor: T.success }]} />
-                <Text style={s.statusPillText}>Authenticated</Text>
+          {/* ── Tab Control ── */}
+          <View style={s.tabContainer}>
+            <Pressable 
+              onPress={() => setActiveTab('today')}
+              style={[s.tabBtn, activeTab === 'today' && s.tabBtnActive]}
+            >
+              <Text style={[s.tabText, activeTab === 'today' && s.tabTextActive]}>Today</Text>
+            </Pressable>
+            <Pressable 
+              onPress={() => setActiveTab('history')}
+              style={[s.tabBtn, activeTab === 'history' && s.tabBtnActive]}
+            >
+              <Text style={[s.tabText, activeTab === 'history' && s.tabTextActive]}>History</Text>
+            </Pressable>
+          </View>
+
+          {activeTab === 'today' ? (
+            <>
+              {/* ── Today card ── */}
+              <View style={s.todayCard}>
+                <View style={s.todayLeft}>
+                  <Text style={s.todayLabel}>Today</Text>
+                  <Text style={s.todayDate}>{formatDate(Date.now())}</Text>
+                </View>
+                <View style={s.todayRight}>
+                  <View style={s.statusPill}>
+                    <View style={[s.statusDot, { backgroundColor: T.success }]} />
+                    <Text style={s.statusPillText}>Authenticated</Text>
+                  </View>
+                </View>
               </View>
-            </View>
-          </View>
 
-          {/* ── Stats row ── */}
-          <View style={s.statsRow}>
-            <View style={s.statBox}>
-              <Text style={s.statValue}>{records.length}</Text>
-              <Text style={s.statLabel}>Total today</Text>
-            </View>
-            <View style={s.statDivider} />
-            <View style={s.statBox}>
-              <Text style={s.statValue}>
-                {records.length > 0 ? formatTime(records[records.length - 1].timestamp) : '—'}
-              </Text>
-              <Text style={s.statLabel}>First in</Text>
-            </View>
-            <View style={s.statDivider} />
-            <View style={s.statBox}>
-              <Text style={s.statValue}>{records[0] ? formatTime(records[0].timestamp) : '—'}</Text>
-              <Text style={s.statLabel}>Last event</Text>
-            </View>
-          </View>
+              {/* ── Stats row ── */}
+              <View style={s.statsRow}>
+                <View style={s.statBox}>
+                  <Text style={s.statValue}>{records.length}</Text>
+                  <Text style={s.statLabel}>Total today</Text>
+                </View>
+                <View style={s.statDivider} />
+                <View style={s.statBox}>
+                  <Text style={s.statValue}>
+                    {records.length > 0 ? formatTime(records[records.length - 1].timestamp) : '—'}
+                  </Text>
+                  <Text style={s.statLabel}>First in</Text>
+                </View>
+                <View style={s.statDivider} />
+                <View style={s.statBox}>
+                  <Text style={s.statValue}>{records[0] ? formatTime(records[0].timestamp) : '—'}</Text>
+                  <Text style={s.statLabel}>Last event</Text>
+                </View>
+              </View>
 
-          {/* ── Location ── */}
-          <View style={s.locationRow}>
-            <Text style={s.locationIcon}>📍</Text>
-            <Text style={s.locationText} numberOfLines={1}>{locationLabel}</Text>
-          </View>
+              {/* ── Location ── */}
+              <View style={s.locationRow}>
+                <Text style={s.locationIcon}>📍</Text>
+                <Text style={s.locationText} numberOfLines={1}>{locationLabel}</Text>
+              </View>
 
-          {/* ── Attendance list ── */}
-          <View style={s.sectionHeader}>
-            <Text style={s.sectionTitle}>Attendance log</Text>
-            <Text style={s.sectionCount}>{records.length} records</Text>
-          </View>
+              {/* ── Attendance list ── */}
+              <View style={s.sectionHeader}>
+                <Text style={s.sectionTitle}>Attendance log</Text>
+                <Text style={s.sectionCount}>{records.length} records</Text>
+              </View>
 
-          {records.length === 0 ? (
-            <View style={s.emptyBox}>
-              <Text style={s.emptyIcon}>⏳</Text>
-              <Text style={s.emptyText}>No records yet today</Text>
-            </View>
+              {records.length === 0 ? (
+                <View style={s.emptyBox}>
+                  <Text style={s.emptyIcon}>⏳</Text>
+                  <Text style={s.emptyText}>No records yet today</Text>
+                </View>
+              ) : (
+                records.map(r => <AttendanceCard key={r.id} record={r} />)
+              )}
+
+              {/* ── Quick actions ── */}
+              <View style={s.actionsRow}>
+                <Pressable
+                  style={({ pressed }) => [s.actionBtn, pressed && { opacity: 0.8 }]}
+                  onPress={() => router.push('/scanner')}
+                >
+                  <Text style={s.actionIcon}>⊙</Text>
+                  <Text style={s.actionLabel}>Scan again</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [s.actionBtn, pressed && { opacity: 0.8 }]}
+                  onPress={() => setDrawerOpen(true)}
+                >
+                  <Text style={s.actionIcon}>☰</Text>
+                  <Text style={s.actionLabel}>Profile</Text>
+                </Pressable>
+              </View>
+            </>
           ) : (
-            records.map(r => <AttendanceCard key={r.id} record={r} />)
-          )}
+            <>
+              {/* ── History Tab ── */}
+              <Calendar 
+                onMonthChange={handleMonthChange}
+                onDateSelect={(ts) => {
+                  setSelectedDate(ts);
+                  loadHistoricalDay(ts);
+                }}
+                markedDates={markedDates}
+              />
 
-          {/* ── Quick actions ── */}
-          <View style={s.actionsRow}>
-            <Pressable
-              style={({ pressed }) => [s.actionBtn, pressed && { opacity: 0.8 }]}
-              onPress={() => router.push('/scanner')}
-            >
-              <Text style={s.actionIcon}>⊙</Text>
-              <Text style={s.actionLabel}>Scan again</Text>
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [s.actionBtn, pressed && { opacity: 0.8 }]}
-              onPress={() => setDrawerOpen(true)}
-            >
-              <Text style={s.actionIcon}>☰</Text>
-              <Text style={s.actionLabel}>Profile</Text>
-            </Pressable>
-          </View>
+              <View style={[s.sectionHeader, { marginTop: T.sp8 }]}>
+                <Text style={s.sectionTitle}>Logs for {formatDate(selectedDate)}</Text>
+                {isSyncingHistory ? (
+                  <Text style={s.sectionCount}>Syncing...</Text>
+                ) : (
+                  <Text style={s.sectionCount}>{historicalRecords.length} records</Text>
+                )}
+              </View>
+
+              {historicalRecords.length === 0 ? (
+                <View style={s.emptyBox}>
+                  <Text style={s.emptyIcon}>📅</Text>
+                  <Text style={s.emptyText}>No attendance on this date</Text>
+                </View>
+              ) : (
+                historicalRecords.map(r => <AttendanceCard key={r.id} record={r} />)
+              )}
+            </>
+          )}
 
         </ScrollView>
       </Animated.View>
@@ -423,4 +540,11 @@ const s = StyleSheet.create({
   drawerRowValue:{ fontSize: T.fs13, fontWeight: '600', color: T.black, fontFamily: T.font },
   logoutBtn:     { marginTop: T.sp8, height: 48, borderWidth: 1.5, borderColor: T.error, borderRadius: T.r8, alignItems: 'center', justifyContent: 'center' },
   logoutText:    { fontSize: T.fs14, fontWeight: '600', color: T.error, fontFamily: T.font },
+
+  // Tabs
+  tabContainer:  { flexDirection: 'row', backgroundColor: T.offWhite, borderRadius: T.r12, padding: 4, borderWidth: 1, borderColor: T.hairline },
+  tabBtn:        { flex: 1, paddingVertical: T.sp10, alignItems: 'center', borderRadius: T.r8 },
+  tabBtnActive:  { backgroundColor: T.white, shadowColor: T.black, shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
+  tabText:       { fontSize: T.fs13, fontWeight: '600', color: T.muted, fontFamily: T.font },
+  tabTextActive: { color: T.black },
 });

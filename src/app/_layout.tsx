@@ -73,7 +73,7 @@ export default function RootLayout() {
       return;
     }
 
-    const signedInRoutes = ['/home', '/attendance', '/admin', '/states'];
+    const signedInRoutes = ['/home', '/attendance', '/admin'];
     if (!isAuth && signedInRoutes.includes(pathname)) {
       router.replace('/');
       return;
@@ -125,7 +125,6 @@ export default function RootLayout() {
         <Stack.Screen name="attendance" options={{ title: 'Activity Logs' }} />
         <Stack.Screen name="enrollment" options={{ title: 'Profile & Settings' }} />
         <Stack.Screen name="admin" options={{ title: 'Admin' }} />
-        <Stack.Screen name="states" options={{ title: 'System States' }} />
       </Stack>
     </Provider>
   );

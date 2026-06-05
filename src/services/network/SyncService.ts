@@ -41,8 +41,8 @@ export class SyncService {
         try {
             await BackgroundFetch.registerTaskAsync(BACKGROUND_SYNC_TASK, {
                 minimumInterval: 15 * 60, // 15 minutes
-                stopOnTerminate: false,
-                startOnBoot: true,
+                stopOnTerminate: false, // Keep running after app is killed if supported
+                startOnBoot: true,      // Start after device reboot
             });
             console.log('[SyncService] Background fetch registered.');
         } catch (err) {
