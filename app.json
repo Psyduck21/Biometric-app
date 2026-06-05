@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "biometric",
+    "name": "Aegis",
     "slug": "biometric",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -41,11 +41,10 @@
           "resizeMode": "contain",
           "backgroundColor": "#ffffff",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#ffffff"
           }
         }
       ],
-      "expo-secure-store",
       [
         "expo-build-properties",
         {
