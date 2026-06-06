@@ -132,8 +132,22 @@ export class AppSessionService {
       if (response.success && response.data && response.data.length > 0) {
         cloudUser = response.data[0];
         console.log(`[AppSessionService] Found existing cloud user with ID: ${cloudUser.id}`);
+
+        // Prevent registration if the user is already bound to a different device
+        const bindingResponse = await apiService.get(`/device_bindings?user_id=eq.${cloudUser.id}&is_active=eq.1`);
+        if (bindingResponse.success && bindingResponse.data && bindingResponse.data.length > 0) {
+          const currentDeviceId = await deviceBindingService.getDeviceId();
+          const isBoundToCurrentDevice = bindingResponse.data.some((b: any) => b.device_id === currentDeviceId);
+          
+          if (!isBoundToCurrentDevice) {
+            throw new Error('Employee ID is already registered to another device. Please use account recovery.');
+          }
+        }
       }
     } catch (e) {
+      if (e instanceof Error && e.message.includes('already registered')) {
+        throw e;
+      }
       console.warn('[AppSessionService] Could not check cloud for existing user', e);
     }
 
