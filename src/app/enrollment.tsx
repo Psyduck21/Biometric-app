@@ -20,7 +20,7 @@ import { useAppDispatch } from '../store/hooks';
 import { setProfile } from '../store/slices/authSlices';
 import BiometricScanner from '../components/BiometricScanner';
 
-type Stage = 'info' | 'liveness' | 'capture' | 'success' | 'failed';
+type Stage = 'checking_device' | 'info' | 'liveness' | 'capture' | 'success' | 'failed';
 
 // ── Step indicator ─────────────────────────────────────────────────────────
 function StepRow({ current }: { current: number }) {
@@ -60,16 +60,47 @@ function StepRow({ current }: { current: number }) {
 export default function EnrollmentScreen() {
   const dispatch = useAppDispatch();
 
-  const [stage, setStage] = useState<Stage>('info');
+  const [stage, setStage] = useState<Stage>('checking_device');
   const [fullName, setFullName] = useState('');
   const [employeeId, setEmpId] = useState('');
   const [email, setEmail] = useState('');
+  const [isLocked, setIsLocked] = useState(false);
+  const [offlineBlocked, setOfflineBlocked] = useState(false);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [captured, setCaptured] = useState(0);
   const [required, setRequired] = useState(5);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (stage === 'checking_device') {
+      appSessionService.checkCloudDeviceBinding()
+        .then(user => {
+          if (user) {
+            setFullName(user.full_name || '');
+            setEmpId(user.employee_id || '');
+            let parsedEmail = '';
+            try {
+              if (user.metadata) {
+                const meta = typeof user.metadata === 'string' ? JSON.parse(user.metadata) : user.metadata;
+                parsedEmail = meta.email || '';
+              }
+            } catch (e) {}
+            setEmail(parsedEmail);
+            setIsLocked(true);
+          }
+          setStage('info');
+        })
+        .catch(err => {
+          if (err.message === 'offline') {
+            setOfflineBlocked(true);
+          } else {
+            setStage('info');
+          }
+        });
+    }
+  }, [stage]);
 
   // ── Step 1 submit ──────────────────────────────────────────────────────
   const handleContinue = async () => {
@@ -136,50 +167,86 @@ export default function EnrollmentScreen() {
       <StepRow current={stageIndex} />
       <View style={s.divider} />
 
+      {/* ── Stage: Checking Device ──────────────────────────────────────────── */}
+      {stage === 'checking_device' && (
+        <View style={s.centerBox}>
+          <ActivityIndicator size="large" color={T.yellow} />
+          <Text style={[s.stageHeading, { marginTop: T.sp24 }]}>Verifying device...</Text>
+          <Text style={s.stageSub}>Checking security tethering.</Text>
+        </View>
+      )}
+
       {/* ── Stage: Info ─────────────────────────────────────────────── */}
-      {stage === 'info' && (
+      {stage === 'info' && offlineBlocked && (
+        <View style={s.centerBox}>
+          <View style={[s.successIcon, { backgroundColor: T.error }]}>
+            <Text style={s.successCheck}>!</Text>
+          </View>
+          <Text style={s.stageHeading}>Internet Required</Text>
+          <Text style={[s.stageSub, { textAlign: 'center', marginHorizontal: T.sp24 }]}>
+            This device has been cleared. For security reasons, you must be connected to the internet for the initial device verification.
+          </Text>
+          <Pressable
+            style={({ pressed }) => [s.btnPrimary, pressed && s.btnPressed, { marginTop: 24, paddingHorizontal: 32 }]}
+            onPress={() => setStage('checking_device')}
+          >
+            <Text style={s.btnPrimaryText}>Try Again</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {stage === 'info' && !offlineBlocked && (
         <KeyboardAvoidingView
           style={{ flex: 1 }}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         >
           <ScrollView contentContainerStyle={s.infoScroll} keyboardShouldPersistTaps="handled">
-            <Text style={s.stageHeading}>Tell us about yourself</Text>
-            <Text style={s.stageSub}>Your details are stored securely on this device only.</Text>
+            <Text style={s.stageHeading}>
+              {isLocked ? `Welcome back, ${fullName.split(' ')[0]}` : 'Tell us about yourself'}
+            </Text>
+            <Text style={s.stageSub}>
+              {isLocked 
+                ? 'This device is securely tethered to your identity. Please confirm your details and re-enroll your face.' 
+                : 'Your details are stored securely on this device only.'}
+            </Text>
 
             <View style={s.fieldGroup}>
               <Text style={s.fieldLabel}>Full name</Text>
               <TextInput
-                style={s.fieldInput}
+                style={[s.fieldInput, isLocked && s.fieldInputLocked]}
                 value={fullName}
                 onChangeText={setFullName}
                 placeholder="Ava Johnson"
                 placeholderTextColor={T.muted}
                 autoCapitalize="words"
+                editable={!isLocked}
               />
             </View>
 
             <View style={s.fieldGroup}>
               <Text style={s.fieldLabel}>Employee ID</Text>
               <TextInput
-                style={s.fieldInput}
+                style={[s.fieldInput, isLocked && s.fieldInputLocked]}
                 value={employeeId}
                 onChangeText={setEmpId}
                 placeholder="EMP-1024"
                 placeholderTextColor={T.muted}
                 autoCapitalize="characters"
+                editable={!isLocked}
               />
             </View>
 
             <View style={s.fieldGroup}>
               <Text style={s.fieldLabel}>Work email</Text>
               <TextInput
-                style={s.fieldInput}
+                style={[s.fieldInput, isLocked && s.fieldInputLocked]}
                 value={email}
                 onChangeText={setEmail}
                 placeholder="ava@company.com"
                 placeholderTextColor={T.muted}
                 keyboardType="email-address"
                 autoCapitalize="none"
+                editable={!isLocked}
               />
             </View>
 
@@ -190,12 +257,14 @@ export default function EnrollmentScreen() {
               onPress={handleContinue}
               disabled={busy}
             >
-              <Text style={s.btnPrimaryText}>{busy ? 'Creating profile…' : 'Continue →'}</Text>
+              <Text style={s.btnPrimaryText}>{busy ? (isLocked ? 'Restoring profile…' : 'Creating profile…') : 'Continue →'}</Text>
             </Pressable>
 
-            <Pressable onPress={() => router.push('/scanner')} style={s.linkBtn}>
-              <Text style={s.linkText}>Already enrolled? Sign in instead</Text>
-            </Pressable>
+            {!isLocked && (
+              <Pressable onPress={() => router.push('/scanner')} style={s.linkBtn}>
+                <Text style={s.linkText}>Already enrolled? Sign in instead</Text>
+              </Pressable>
+            )}
           </ScrollView>
         </KeyboardAvoidingView>
       )}
@@ -263,6 +332,7 @@ const s = StyleSheet.create({
   fieldGroup: { gap: T.sp8 },
   fieldLabel: { fontSize: T.fs13, fontWeight: '600', color: T.black, fontFamily: T.font },
   fieldInput: { borderWidth: 1, borderColor: T.divider, borderRadius: T.r8, padding: T.sp12, fontSize: T.fs16, color: T.black, fontFamily: T.font, backgroundColor: T.white },
+  fieldInputLocked: { backgroundColor: T.offWhite, color: T.muted },
 
   btnPrimary: { backgroundColor: T.yellow, paddingVertical: T.sp16, borderRadius: T.r8, alignItems: 'center', justifyContent: 'center', marginTop: T.sp8, borderWidth: 1.5, borderColor: T.yellowDark },
   btnPressed: { opacity: 0.8, transform: [{ scale: 0.98 }] },
@@ -273,6 +343,7 @@ const s = StyleSheet.create({
 
   errorText: { fontSize: T.fs13, color: T.error, fontFamily: T.font },
 
+  centerBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: T.sp32, gap: T.sp8 },
   successBox: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: T.sp32, gap: T.sp20 },
   successIcon: { width: 80, height: 80, borderRadius: 40, backgroundColor: T.yellow, alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: T.yellowDark },
   successCheck: { fontSize: T.fs32, fontWeight: '700', color: T.black },

@@ -22,6 +22,47 @@ export interface RegistrationInput {
 }
 
 export class AppSessionService {
+  /**
+   * Checks the cloud to see if this specific hardware device is already bound to a user.
+   * If offline, it throws an error to strictly enforce online verification for fresh installs.
+   */
+  async checkCloudDeviceBinding(): Promise<Partial<User> | null> {
+    const { apiService } = require('./network/ApiService');
+    const deviceId = await deviceBindingService.getDeviceId();
+    
+    try {
+      const response = await apiService.get(`/device_bindings?device_id=eq.${deviceId}&is_active=eq.1&select=user_id,users(id,full_name,employee_id,metadata)`);
+      
+      if (!response.success || response.status === 408 || response.status === 0) {
+        throw new Error('Network error');
+      }
+
+      if (response.data && response.data.length > 0) {
+        const binding = response.data[0];
+        if (binding.users) {
+          const userObj = Array.isArray(binding.users) ? binding.users[0] : binding.users;
+          let email = '';
+          try {
+            if (userObj.metadata) {
+              const meta = typeof userObj.metadata === 'string' ? JSON.parse(userObj.metadata) : userObj.metadata;
+              email = meta.email || '';
+            }
+          } catch (e) {}
+
+          return {
+            id: userObj.id,
+            full_name: userObj.full_name,
+            employee_id: userObj.employee_id,
+            metadata: JSON.stringify({ email })
+          };
+        }
+      }
+      return null;
+    } catch (e) {
+      throw new Error('offline');
+    }
+  }
+
   async resolveLaunchState(): Promise<LaunchState> {
     const binding = await deviceBindingService.getBindingForCurrentDevice();
     if (!binding) {
@@ -115,7 +156,8 @@ export class AppSessionService {
         await UserRepository.createUser(existingLocalUser);
       }
       
-      await deviceBindingService.bindDevice(existingLocalUser.id);
+      const binding = await deviceBindingService.bindDevice(existingLocalUser.id);
+      await this.enqueueDeviceBindingSync(binding);
       return existingLocalUser as User;
     }
 
@@ -134,11 +176,12 @@ export class AppSessionService {
     };
 
     await UserRepository.createUser(user);
-    await deviceBindingService.bindDevice(user.id);
+    const binding = await deviceBindingService.bindDevice(user.id);
     
     if (!cloudUser) {
       await this.enqueueUserSync(user);
     }
+    await this.enqueueDeviceBindingSync(binding);
 
     return user;
   }
@@ -169,6 +212,35 @@ export class AppSessionService {
       await SyncQueueRepository.insert(syncItem);
     } catch (e) {
       console.warn('[AppSessionService] Failed to enqueue user sync item:', e);
+    }
+  }
+
+  private async enqueueDeviceBindingSync(binding: any) {
+    try {
+      const now = Date.now();
+      const masterKey = await CryptoService.getMasterKey();
+      if (!masterKey) throw new Error('Master key not found for device binding sync');
+      const payloadJson = JSON.stringify(binding);
+      const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
+      
+      const syncItem: SyncQueueItem = {
+        id: CryptoService.uuid(),
+        entity_type: 'device_binding',
+        entity_id: binding.id,
+        operation: 'create',
+        payload_cipher: cipher,
+        payload_iv: iv,
+        payload_tag: tag,
+        idempotency_key: CryptoService.uuid(),
+        status: 'pending',
+        priority: 2, // High priority, after user
+        created_at: now,
+        attempt_count: 0
+      };
+      
+      await SyncQueueRepository.insert(syncItem);
+    } catch (e) {
+      console.warn('[AppSessionService] Failed to enqueue device_binding sync item:', e);
     }
   }
 
