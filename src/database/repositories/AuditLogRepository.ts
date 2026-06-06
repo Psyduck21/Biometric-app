@@ -1,5 +1,6 @@
 import { dbClient } from '../DatabaseClient';
 import { AuditLog } from '../../types/domain';
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 /**
  * AuditLogRepository
@@ -17,9 +18,10 @@ export class AuditLogRepository {
      * failure_reason, device_id, and metadata are required.
      *
      * @param log - The fully populated AuditLog object to persist.
+     * @param tx - Optional transaction object.
      */
-    static async insert(log: AuditLog): Promise<void> {
-        const db = dbClient.getDb();
+    static async insert(log: AuditLog, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
         const sql = `
             INSERT INTO audit_logs (
                 id, user_id, actor_id, action, entity_type, entity_id,
@@ -27,7 +29,7 @@ export class AuditLogRepository {
                 metadata, sync_status
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
-        await db.execute(sql, [
+        await runner.execute(sql, [
             log.id,
             log.user_id ?? null,
             log.actor_id ?? null,

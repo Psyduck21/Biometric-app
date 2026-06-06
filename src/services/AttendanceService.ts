@@ -23,7 +23,8 @@ export class AttendanceService {
         eventType: AttendanceEventType,
         notes?: string
     ): Promise<AttendanceRecord> {
-        const now = Date.now();
+        const { TimeService } = require('./TimeService');
+        const now = await TimeService.now();
         const deviceId = await deviceBindingService.getDeviceId();
         const recordId = CryptoService.uuid();
 
@@ -100,7 +101,8 @@ export class AttendanceService {
         const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
         
         const idempotencyKey = CryptoService.uuid();
-        const now = Date.now();
+        const { TimeService } = require('./TimeService');
+        const now = await TimeService.now();
         const syncId = CryptoService.uuid();
 
         const syncItem: SyncQueueItem = {

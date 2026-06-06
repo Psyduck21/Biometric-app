@@ -57,7 +57,27 @@ export class ConfigRepository {
         const parsed = parseFloat(raw);
         return isNaN(parsed) ? fallback : parsed;
     }
+    /**
+     * Returns a config value as a boolean.
+     */
+    static async getBoolean(key: string, fallback: boolean = false): Promise<boolean> {
+        const raw = await ConfigRepository.getString(key, String(fallback));
+        return raw === 'true' || raw === '1';
+    }
 
+    /**
+     * Upserts a configuration key-value pair as number.
+     */
+    static async setNumber(key: string, value: number, updatedBy = 'system'): Promise<void> {
+        await ConfigRepository.set(key, String(value), updatedBy);
+    }
+
+    /**
+     * Upserts a configuration key-value pair as boolean.
+     */
+    static async setBoolean(key: string, value: boolean, updatedBy = 'system'): Promise<void> {
+        await ConfigRepository.set(key, String(value), updatedBy);
+    }
     /**
      * Upserts a configuration key-value pair.
      *

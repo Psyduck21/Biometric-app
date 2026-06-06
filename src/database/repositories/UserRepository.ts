@@ -1,4 +1,5 @@
 import { dbClient } from "../DatabaseClient";
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 // this is the user object in which the data is stored in the database
 export interface User {
@@ -10,6 +11,8 @@ export interface User {
     enrolled_at: number;
     updated_at: number;
     sync_status: string;
+    department?: string;
+    metadata?: string;
 }
 
 export class UserRepository {
@@ -20,16 +23,16 @@ export class UserRepository {
     returns : Promise<void>
     */
 
-    static async createUser(user: User) {
+    static async createUser(user: User, tx?: Transaction) {
         try {
-            const db = dbClient.getDb();
+            const runner = tx || dbClient.getDb();
 
             const statement = `
-              INSERT INTO users (id, employee_id, full_name, role, status, enrolled_at, updated_at, sync_status)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+              INSERT INTO users (id, employee_id, full_name, role, status, enrolled_at, updated_at, sync_status, department, metadata)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
-            await db.execute(statement, [
+            await runner.execute(statement, [
                 user.id,
                 user.employee_id,
                 user.full_name,
@@ -38,6 +41,8 @@ export class UserRepository {
                 user.enrolled_at,
                 user.updated_at,
                 user.sync_status,
+                user.department || null,
+                user.metadata || null
             ]);
         } catch (error) {
             console.error("Error in creating user : ", error);
@@ -54,11 +59,11 @@ export class UserRepository {
     returns Promise<User|null> 
     */
 
-    static async getUserById(id: string): Promise<User | null> {
+    static async getUserById(id: string, tx?: Transaction): Promise<User | null> {
         try {
-            const db = dbClient.getDb();
+            const runner = tx || dbClient.getDb();
 
-            const result = await db.execute("SELECT * FROM users WHERE id = ?", [id]);
+            const result = await runner.execute("SELECT * FROM users WHERE id = ?", [id]);
             if (result.rows && result.rows.length > 0) {
                 return result.rows?.[0] as unknown as User;
             }

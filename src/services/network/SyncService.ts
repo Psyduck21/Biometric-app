@@ -177,6 +177,13 @@ export class SyncService {
                 if (successfullyProcessedKeys.length > 0) {
                     await SyncQueueRepository.markSynced(successfullyProcessedKeys, Date.now());
                     console.log(`[SyncService] Successfully synced ${successfullyProcessedKeys.length} items.`);
+                    
+                    // --- SECURITY: TIME TAMPERING & OFFLINE EVASION ---
+                    const { TimeService } = require('../TimeService');
+                    const { ConfigRepository } = require('../../database/repositories/ConfigRepository');
+                    await TimeService.clearTamperFlag();
+                    await ConfigRepository.setNumber('last_successful_sync', Date.now());
+                    // --------------------------------------------------
                 }
 
                 if (failedKeys.length > 0) {

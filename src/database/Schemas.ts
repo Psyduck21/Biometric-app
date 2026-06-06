@@ -8,6 +8,7 @@ export const INITIAL_SCHEMA = `
     enrolled_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     sync_status TEXT NOT NULL DEFAULT 'pending',
+    department TEXT,
     metadata TEXT
   );
 

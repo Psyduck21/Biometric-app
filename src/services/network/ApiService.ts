@@ -35,12 +35,24 @@ export class ApiService {
     }
 
     private async request<T>(method: string, endpoint: string, body?: any): Promise<ApiResponse<T>> {
-        // Retrieve base URL from environment variables, fallback to ConfigRepository, fallback to placeholder
-        const envUrl = process.env.EXPO_PUBLIC_SUPABASE_PROJECT_URL ? `${process.env.EXPO_PUBLIC_SUPABASE_PROJECT_URL}/rest/v1` : null;
-        const baseUrl = envUrl || await ConfigRepository.getString('api_base_url', 'https://api.example.com/v1');
+        // Base Supabase Project URL
+        let projectUrl = process.env.EXPO_PUBLIC_SUPABASE_PROJECT_URL;
+        if (!projectUrl) {
+            const fallback = await ConfigRepository.getString('api_base_url', 'https://api.example.com');
+            projectUrl = fallback ? fallback.replace(/\/rest\/v1\/?$/, '') : 'https://api.example.com';
+        }
+        
+        let url: string;
+        if (endpoint.startsWith('/functions/')) {
+            // Edge Functions URL (e.g. https://project.supabase.co/functions/v1/...)
+            url = `${projectUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
+        } else {
+            // PostgREST URL (e.g. https://project.supabase.co/rest/v1/...)
+            const baseUrl = `${projectUrl.replace(/\/$/, '')}/rest/v1`;
+            url = `${baseUrl}/${endpoint.replace(/^\//, '')}`;
+        }
 
         const deviceId = await deviceBindingService.getDeviceId();
-        const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
 
         const envKey = process.env.EXPO_PUBLIC_SUPABASE_API_KEY || null;
         const supabaseKey = envKey || await ConfigRepository.getString('supabase_anon_key', '');
