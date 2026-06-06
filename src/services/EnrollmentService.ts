@@ -2,9 +2,12 @@ import { CryptoService } from './CryptoService';
 import { deviceBindingService } from './DeviceBindingService';
 import { securityCheckService } from './SecurityCheckService';
 import { auditService } from './AuditService';
+import { appSessionService } from './AppSessionService';
 import { FaceTemplateRepository } from '../database/repositories/FaceTemplateRepository';
 import { SyncQueueRepository } from '../database/repositories/SyncQueueRepository';
+import { UserRepository } from '../database/repositories/UserRepository';
 import { ConfigRepository } from '../database/repositories/ConfigRepository';
+import { dbClient } from '../database/DatabaseClient';
 import {
     EnrollmentSession,
     EnrollmentSample,
@@ -278,6 +281,52 @@ export class EnrollmentService {
                 masterEmbedding[i] /= norm;
             }
 
+            // --- RE-ENROLLMENT SECURITY GATE (IDENTITY HIJACKING PREVENTION) ---
+            const activeTemplates = await FaceTemplateRepository.getActive(session.userId);
+            if (activeTemplates.length > 0) {
+                console.log(`[Enrollment] Re-enrollment detected. Checking similarity against ${activeTemplates.length} existing templates...`);
+                let maxSim = 0;
+
+                for (const oldTemplate of activeTemplates) {
+                    try {
+                        const decryptedJson = await CryptoService.decrypt(
+                            oldTemplate.embedding_cipher,
+                            masterKey,
+                            oldTemplate.embedding_iv,
+                            oldTemplate.embedding_tag
+                        );
+                        const oldEmbeddingArray = JSON.parse(decryptedJson) as number[];
+                        const oldEmbedding = new Float32Array(oldEmbeddingArray);
+
+                        const sim = this._cosineSimilarity(masterEmbedding, oldEmbedding);
+                        if (sim > maxSim) maxSim = sim;
+                    } catch (decErr) {
+                        console.warn(`[Enrollment] Failed to decrypt old template ${oldTemplate.id} for similarity check`, decErr);
+                    }
+                }
+
+                console.log(`[Enrollment] Max similarity with previous templates: ${maxSim.toFixed(4)}`);
+                const RE_ENROLL_SIMILARITY_THRESHOLD = await ConfigRepository.getNumber('re_enroll_similarity_threshold', 0.65);
+
+                if (maxSim < RE_ENROLL_SIMILARITY_THRESHOLD && maxSim > 0) { // maxSim > 0 ensures we don't reject if all decryptions failed
+                    console.error(`[Enrollment] IDENTITY MISMATCH! New face similarity (${maxSim.toFixed(4)}) is below threshold (${RE_ENROLL_SIMILARITY_THRESHOLD}).`);
+                    
+                    // Log the takeover attempt
+                    await auditService.log({
+                        user_id: session.userId,
+                        action: 'identity_takeover_attempt',
+                        entity_type: 'face_template',
+                        outcome: 'blocked',
+                        failure_reason: 'identity_mismatch',
+                        metadata: JSON.stringify({ maxSimilarity: maxSim, threshold: RE_ENROLL_SIMILARITY_THRESHOLD }),
+                    });
+
+                    this.sessions.delete(sessionId);
+                    return { success: false, failureReason: 'identity_mismatch', consistencyScore };
+                }
+            }
+            // -------------------------------------------------------------------
+
             const embeddingJson = JSON.stringify(Array.from(masterEmbedding));
             const { cipher, iv, tag } = await CryptoService.encrypt(embeddingJson, masterKey);
             const templateId = CryptoService.uuid();
@@ -297,42 +346,69 @@ export class EnrollmentService {
                 sync_status:      'pending',
             };
 
-            await FaceTemplateRepository.insert(template);
-            templateIds.push(templateId);
-            templates.push(template);
+            const pendingUser = appSessionService.pendingUser;
+            if (!pendingUser && session.userId) {
+                // If there's no pending user, maybe they are just re-enrolling.
+                // But if there is, we must save it inside the transaction.
+            }
+
+            // Execute EVERYTHING in a single transaction
+            await dbClient.getDb().transaction(async (tx) => {
+                // 1. Insert/Update User if pending
+                if (pendingUser) {
+                    if (appSessionService.isCloudUserMissing) {
+                        // User exists locally but needs to adopt cloud ID, handled in registerUser mostly.
+                        // We will just do a create/replace here since SQLite insert might conflict if it exists.
+                        // Actually, UserRepository.createUser uses INSERT. If it exists, it might fail.
+                        // Let's assume registerUser deleted it if UUID mismatched, or it's new.
+                        await UserRepository.createUser(pendingUser, tx);
+                        await appSessionService.enqueueUserSync(pendingUser, tx);
+                    } else {
+                        // Just create it
+                        await UserRepository.createUser(pendingUser, tx);
+                        // enqueueUserSync not needed because they exist in cloud
+                    }
+                }
+
+                // 2. Revoke old templates & insert new template
+                await FaceTemplateRepository.revokeAllForUser(session.userId, tx);
+                await FaceTemplateRepository.insert(template, tx);
+                templateIds.push(templateId);
+                templates.push(template);
+
+                // 3. Bind Device
+                const binding = await deviceBindingService.bindDevice(session.userId, tx);
+
+                // 4. Enqueue Sync Items
+                // Enqueue device binding sync
+                await appSessionService.enqueueDeviceBindingSync(binding, tx);
+                
+                // Enqueue template sync
+                await this._enqueueSyncItem(template, masterEmbedding, masterKey, now, tx);
+
+                // 5. Write audit log
+                await auditService.log({
+                    user_id:     session.userId,
+                    action:      'enroll',
+                    entity_type: 'face_template',
+                    outcome:     'success',
+                    metadata:    JSON.stringify({ templateCount: templateIds.length, consistencyScore }),
+                }, tx);
+            });
+
+            // Clear the pending user now that it is saved
+            appSessionService.pendingUser = null;
+            appSessionService.isCloudUserMissing = false;
+
         } catch (e) {
-            console.error('[EnrollmentService] storage_error during db insert/encrypt:', e);
+            console.error('[EnrollmentService] storage_error during db insert/encrypt/transaction:', e);
             this.sessions.delete(sessionId);
             return { success: false, failureReason: 'storage_error' };
         }
 
-        // Step 5: Device binding
-        try {
-            await deviceBindingService.bindDevice(session.userId);
-        } catch {
-            // Binding failure is non-fatal — log it and continue
-            console.warn('[EnrollmentService] Device binding failed; templates already saved.');
-        }
-
-        // Step 6: Enqueue sync items for each template
-        try {
-            for (const template of templates) {
-                await this._enqueueSyncItem(template, masterKey, now);
-            }
-        } catch {
-            // Sync queue failure is non-fatal — the SyncService will retry on next launch
-            console.warn('[EnrollmentService] Failed to enqueue some sync items.');
-        }
-
-        // Step 7: Audit log
-        await auditService.log({
-            user_id:     session.userId,
-            action:      'enroll',
-            entity_type: 'face_template',
-            outcome:     'success',
-            metadata:    JSON.stringify({ templateCount: templateIds.length, consistencyScore }),
-        });
-
+        // The below steps (Device Binding, Sync Items, Audit Log) 
+        // are now handled transactionally above.
+        
         // Step 8: Clean up
         this.sessions.delete(sessionId);
 
@@ -429,12 +505,15 @@ export class EnrollmentService {
      */
     private async _enqueueSyncItem(
         template: FaceTemplate,
+        rawEmbedding: Float32Array,
         masterKey: string,
-        now: number
+        now: number,
+        tx?: any
     ): Promise<void> {
         const payload = JSON.stringify({
             ...template,
-            is_active: template.is_active === 1
+            is_active: template.is_active === 1,
+            embedding: Array.from(rawEmbedding)
         });
         const { cipher, iv, tag } = await CryptoService.encrypt(payload, masterKey);
 
@@ -455,7 +534,7 @@ export class EnrollmentService {
             created_at:      now,
         };
 
-        await SyncQueueRepository.insert(item);
+        await SyncQueueRepository.insert(item, tx);
     }
 }
 

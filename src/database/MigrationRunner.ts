@@ -30,11 +30,24 @@ export class MigrationRunner {
             );
             console.log("[MigrationRunner] M004: key_algorithm column added to device_bindings.");
         } catch (e: any) {
-            // "duplicate column name" means the column already exists — safe to ignore
             if (String(e?.message ?? e).includes('duplicate column')) {
                 console.log("[MigrationRunner] M004: key_algorithm column already present, skipping.");
             } else {
                 console.error("[MigrationRunner] M004: Unexpected error adding key_algorithm column:", e);
+            }
+        }
+
+        try {
+            const db2 = dbClient.getDb();
+            await db2.execute(
+                `ALTER TABLE users ADD COLUMN department TEXT`
+            );
+            console.log("[MigrationRunner] M005: department column added to users.");
+        } catch (e: any) {
+            if (String(e?.message ?? e).includes('duplicate column')) {
+                console.log("[MigrationRunner] M005: department column already present, skipping.");
+            } else {
+                console.error("[MigrationRunner] M005: Unexpected error adding department column:", e);
             }
         }
     }

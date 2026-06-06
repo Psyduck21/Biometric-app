@@ -12,7 +12,7 @@ export interface AuthResult {
     sessionId?: string;
     similarityScore?: number;
     livenessScore?: number;
-    failureReason?: 'no_match' | 'device_mismatch' | 'locked' | 'storage_error';
+    failureReason?: 'no_match' | 'device_mismatch' | 'locked' | 'storage_error' | 'offline_locked' | 'security_violation';
     attemptsRemaining?: number;
 }
 
@@ -27,6 +27,17 @@ export class AuthenticationService {
      */
     async authenticate(queryEmbedding: Float32Array, livenessScore: number): Promise<AuthResult> {
         const deviceId = await deviceBindingService.getDeviceId();
+        
+        // 0. Security Gate Check
+        const { securityCheckService } = require('./SecurityCheckService');
+        const securityReport = await securityCheckService.checkAll();
+        if (!securityReport.isSafe) {
+            console.warn('[AuthenticationService] Security check failed during auth:', securityReport);
+            return {
+                success: false,
+                failureReason: securityReport.isOfflineLocked ? 'offline_locked' : 'security_violation',
+            };
+        }
         
         // 1. Check Lockout
         const lockoutStatus = await sessionService.checkLockout(deviceId);

@@ -117,146 +117,162 @@ export class AppSessionService {
     };
   }
 
-  async registerUser(input: RegistrationInput): Promise<User> {
-    const now = Date.now();
-    const employeeId = input.employeeId.trim();
-    const normalizedEmail = input.email.trim().toLowerCase();
-    // 1. Check Cloud Supabase DB for authoritative record
-    let cloudUser: any = null;
-    try {
-      // Inline apiService call without explicit import if it's not at the top,
-      // actually we need to import apiService if it's not imported.
-      // Wait, let's just use the apiService.
-      const { apiService } = require('./network/ApiService');
-      const response = await apiService.get(`/users?employee_id=eq.${employeeId}`);
-      if (response.success && response.data && response.data.length > 0) {
-        cloudUser = response.data[0];
-        console.log(`[AppSessionService] Found existing cloud user with ID: ${cloudUser.id}`);
+    pendingUser: User | null = null;
+    isCloudUserMissing: boolean = false;
 
-        // Prevent registration if the user is already bound to a different device
-        const bindingResponse = await apiService.get(`/device_bindings?user_id=eq.${cloudUser.id}&is_active=eq.1`);
-        if (bindingResponse.success && bindingResponse.data && bindingResponse.data.length > 0) {
-          const currentDeviceId = await deviceBindingService.getDeviceId();
-          const isBoundToCurrentDevice = bindingResponse.data.some((b: any) => b.device_id === currentDeviceId);
-          
-          if (!isBoundToCurrentDevice) {
-            throw new Error('Employee ID is already registered to another device. Please use account recovery.');
-          }
-        }
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.includes('already registered')) {
-        throw e;
-      }
-      console.warn('[AppSessionService] Could not check cloud for existing user', e);
-    }
-
-    const existingLocalUser = await UserRepository.getUserByEmployeeId(employeeId);
-
-    // Scenario A: User exists locally
-    if (existingLocalUser) {
-      if (!cloudUser) {
-        // Cloud is missing the user. Force sync!
-        console.log('[AppSessionService] Cloud is missing the user. Forcing re-sync.');
-        await this.enqueueUserSync(existingLocalUser as unknown as User);
-      } else if (cloudUser.id !== existingLocalUser.id) {
-        // Mismatch! Adopt cloud UUID to prevent foreign key errors.
-        console.log(`[AppSessionService] UUID Mismatch! Cloud: ${cloudUser.id}, Local: ${existingLocalUser.id}. Resetting local user...`);
-        await UserRepository.deleteUser(existingLocalUser.id);
+    async registerUser(input: RegistrationInput): Promise<User> {
+        const now = Date.now();
+        const employeeId = input.employeeId.trim();
+        const normalizedEmail = input.email.trim().toLowerCase();
         
-        existingLocalUser.id = cloudUser.id;
-        existingLocalUser.enrolled_at = cloudUser.enrolled_at || existingLocalUser.enrolled_at;
-        existingLocalUser.sync_status = 'synced';
-        await UserRepository.createUser(existingLocalUser);
-      }
-      
-      const binding = await deviceBindingService.bindDevice(existingLocalUser.id);
-      await this.enqueueDeviceBindingSync(binding);
-      return existingLocalUser as User;
+        let cloudUser: any = null;
+        try {
+            const { apiService } = require('./network/ApiService');
+            const currentDeviceId = await deviceBindingService.getDeviceId();
+            
+            // Check if THIS device is already bound to a DIFFERENT active user in the cloud
+            const deviceCheckResponse = await apiService.get(`/device_bindings?device_id=eq.${currentDeviceId}&is_active=eq.1`);
+            if (deviceCheckResponse.success && deviceCheckResponse.data && deviceCheckResponse.data.length > 0) {
+                const boundUserId = deviceCheckResponse.data[0].user_id;
+                // We don't know the new user's cloud ID yet unless we query it. We will check it below.
+                // But for now, just note the device's bound user.
+            }
+
+            const response = await apiService.get(`/users?employee_id=eq.${employeeId}`);
+            if (response.success && response.data && response.data.length > 0) {
+                cloudUser = response.data[0];
+                console.log(`[AppSessionService] Found existing cloud user with ID: ${cloudUser.id}`);
+
+                // Prevent registration if the user is already bound to a different device
+                const bindingResponse = await apiService.get(`/device_bindings?user_id=eq.${cloudUser.id}&is_active=eq.1`);
+                if (bindingResponse.success && bindingResponse.data && bindingResponse.data.length > 0) {
+                    const isBoundToCurrentDevice = bindingResponse.data.some((b: any) => b.device_id === currentDeviceId);
+                    
+                    if (!isBoundToCurrentDevice) {
+                        throw new Error('Employee ID is already registered to another device. Please use account recovery.');
+                    }
+                }
+                
+                // Now verify if the device is bound to someone else
+                if (deviceCheckResponse.success && deviceCheckResponse.data && deviceCheckResponse.data.length > 0) {
+                    const boundUserId = deviceCheckResponse.data[0].user_id;
+                    if (boundUserId !== cloudUser.id) {
+                        throw new Error('This device is already bound to another active employee. Please contact IT to unbind it.');
+                    }
+                }
+            } else {
+                // If it's a NEW user, but the device is bound to someone else
+                if (deviceCheckResponse.success && deviceCheckResponse.data && deviceCheckResponse.data.length > 0) {
+                    throw new Error('This device is already bound to another active employee. Please contact IT to unbind it.');
+                }
+            }
+        } catch (e) {
+            if (e instanceof Error && (e.message.includes('already registered') || e.message.includes('already bound'))) {
+                throw e;
+            }
+            console.warn('[AppSessionService] Could not check cloud for existing user', e);
+        }
+
+        const existingLocalUser = await UserRepository.getUserByEmployeeId(employeeId);
+
+        let userToRegister: User;
+
+        if (existingLocalUser) {
+            if (!cloudUser) {
+                console.log('[AppSessionService] Cloud is missing the user. Forcing re-sync.');
+                this.isCloudUserMissing = true;
+            } else if (cloudUser.id !== existingLocalUser.id) {
+                console.log(`[AppSessionService] UUID Mismatch! Resetting local user...`);
+                await UserRepository.deleteUser(existingLocalUser.id);
+            }
+            
+            userToRegister = {
+                ...existingLocalUser,
+                id: cloudUser ? cloudUser.id : existingLocalUser.id,
+                enrolled_at: cloudUser ? (cloudUser.enrolled_at || existingLocalUser.enrolled_at) : existingLocalUser.enrolled_at,
+                sync_status: 'synced'
+            } as unknown as User;
+        } else {
+            userToRegister = {
+                id: cloudUser ? cloudUser.id : CryptoService.uuid(),
+                employee_id: employeeId,
+                full_name: cloudUser ? cloudUser.full_name : input.fullName.trim(),
+                role: cloudUser ? cloudUser.role : 'employee',
+                department: cloudUser ? cloudUser.department : 'Workspace',
+                status: cloudUser ? cloudUser.status : 'active',
+                enrolled_at: cloudUser ? (cloudUser.enrolled_at || now) : now,
+                updated_at: cloudUser ? (cloudUser.updated_at || now) : now,
+                sync_status: cloudUser ? 'synced' : 'pending',
+                metadata: cloudUser ? cloudUser.metadata : JSON.stringify({ email: normalizedEmail }),
+            };
+            
+            if (!cloudUser) {
+                this.isCloudUserMissing = true;
+            }
+        }
+
+        // HOLD IN MEMORY
+        this.pendingUser = userToRegister;
+        return userToRegister;
     }
 
-    // Scenario B & C: User does NOT exist locally
-    const user: User = {
-      id: cloudUser ? cloudUser.id : CryptoService.uuid(),
-      employee_id: employeeId,
-      full_name: cloudUser ? cloudUser.full_name : input.fullName.trim(),
-      role: cloudUser ? cloudUser.role : 'employee',
-      department: cloudUser ? cloudUser.department : 'Workspace',
-      status: cloudUser ? cloudUser.status : 'active',
-      enrolled_at: cloudUser ? (cloudUser.enrolled_at || now) : now,
-      updated_at: cloudUser ? (cloudUser.updated_at || now) : now,
-      sync_status: cloudUser ? 'synced' : 'pending',
-      metadata: cloudUser ? cloudUser.metadata : JSON.stringify({ email: normalizedEmail }),
-    };
-
-    await UserRepository.createUser(user);
-    const binding = await deviceBindingService.bindDevice(user.id);
-    
-    if (!cloudUser) {
-      await this.enqueueUserSync(user);
+    async enqueueUserSync(user: User, tx?: any) {
+        try {
+            const now = Date.now();
+            const masterKey = await CryptoService.getMasterKey();
+            if (!masterKey) throw new Error('Master key not found for user sync');
+            const payloadJson = JSON.stringify(user);
+            const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
+            
+            const syncItem: SyncQueueItem = {
+                id: CryptoService.uuid(),
+                entity_type: 'user',
+                entity_id: user.id,
+                operation: 'create',
+                payload_cipher: cipher,
+                payload_iv: iv,
+                payload_tag: tag,
+                idempotency_key: CryptoService.uuid(),
+                status: 'pending',
+                priority: 1, // High priority so it syncs before attendance records
+                created_at: now,
+                attempt_count: 0
+            };
+            
+            await SyncQueueRepository.insert(syncItem, tx);
+        } catch (e) {
+            console.warn('[AppSessionService] Failed to enqueue user sync item:', e);
+        }
     }
-    await this.enqueueDeviceBindingSync(binding);
 
-    return user;
-  }
-
-  private async enqueueUserSync(user: User) {
-    try {
-      const now = Date.now();
-      const masterKey = await CryptoService.getMasterKey();
-      if (!masterKey) throw new Error('Master key not found for user sync');
-      const payloadJson = JSON.stringify(user);
-      const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
-      
-      const syncItem: SyncQueueItem = {
-        id: CryptoService.uuid(),
-        entity_type: 'user',
-        entity_id: user.id,
-        operation: 'create',
-        payload_cipher: cipher,
-        payload_iv: iv,
-        payload_tag: tag,
-        idempotency_key: CryptoService.uuid(),
-        status: 'pending',
-        priority: 1, // High priority so it syncs before attendance records
-        created_at: now,
-        attempt_count: 0
-      };
-      
-      await SyncQueueRepository.insert(syncItem);
-    } catch (e) {
-      console.warn('[AppSessionService] Failed to enqueue user sync item:', e);
+    async enqueueDeviceBindingSync(binding: any, tx?: any) {
+        try {
+            const now = Date.now();
+            const masterKey = await CryptoService.getMasterKey();
+            if (!masterKey) throw new Error('Master key not found for device binding sync');
+            const payloadJson = JSON.stringify(binding);
+            const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
+            
+            const syncItem: SyncQueueItem = {
+                id: CryptoService.uuid(),
+                entity_type: 'device_binding',
+                entity_id: binding.id,
+                operation: 'create',
+                payload_cipher: cipher,
+                payload_iv: iv,
+                payload_tag: tag,
+                idempotency_key: CryptoService.uuid(),
+                status: 'pending',
+                priority: 2, // High priority, after user
+                created_at: now,
+                attempt_count: 0
+            };
+            
+            await SyncQueueRepository.insert(syncItem, tx);
+        } catch (e) {
+            console.warn('[AppSessionService] Failed to enqueue device_binding sync item:', e);
+        }
     }
-  }
-
-  private async enqueueDeviceBindingSync(binding: any) {
-    try {
-      const now = Date.now();
-      const masterKey = await CryptoService.getMasterKey();
-      if (!masterKey) throw new Error('Master key not found for device binding sync');
-      const payloadJson = JSON.stringify(binding);
-      const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
-      
-      const syncItem: SyncQueueItem = {
-        id: CryptoService.uuid(),
-        entity_type: 'device_binding',
-        entity_id: binding.id,
-        operation: 'create',
-        payload_cipher: cipher,
-        payload_iv: iv,
-        payload_tag: tag,
-        idempotency_key: CryptoService.uuid(),
-        status: 'pending',
-        priority: 2, // High priority, after user
-        created_at: now,
-        attempt_count: 0
-      };
-      
-      await SyncQueueRepository.insert(syncItem);
-    } catch (e) {
-      console.warn('[AppSessionService] Failed to enqueue device_binding sync item:', e);
-    }
-  }
 
   async createVerifiedSession(userId: string, similarityScore = 0.98, livenessScore = 0.99) {
     return sessionService.createSession(userId, 'liveness', similarityScore, livenessScore);

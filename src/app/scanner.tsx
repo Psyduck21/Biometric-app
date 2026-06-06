@@ -56,7 +56,13 @@ export default function ScannerScreen() {
       setTimeout(() => router.replace({ pathname: '/home', params: { justAuthenticated: '1' } } as any), 1200);
     } else {
       const reason = resultData.failureReason ?? 'no_match';
-      const msg = reason === 'locked' ? 'Too many attempts. Try again later.' : reason === 'spoofed' ? 'Spoofing detected.' : 'Authentication failed.';
+      let msg = 'Authentication failed.';
+      if (reason === 'locked') msg = 'Too many attempts. Try again later.';
+      else if (reason === 'spoofed') msg = 'Spoofing detected.';
+      else if (reason === 'offline_locked') msg = 'Offline window exceeded or time tampered. Please reconnect to internet.';
+      else if (reason === 'security_violation') msg = 'Security check failed. Device may be rooted or emulator.';
+      else if (reason === 'device_mismatch') msg = 'This device is no longer bound to your account.';
+      
       setMessage(msg);
       setStage('failed');
     }

@@ -1,5 +1,6 @@
 import { dbClient } from '../DatabaseClient';
 import { SyncQueueItem } from '../../types/domain';
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 /**
  * SyncQueueRepository
@@ -20,9 +21,10 @@ export class SyncQueueRepository {
      * for the same entity+operation combination.
      *
      * @param item - The fully populated SyncQueueItem to enqueue.
+     * @param tx - Optional transaction object.
      */
-    static async insert(item: SyncQueueItem): Promise<void> {
-        const db = dbClient.getDb();
+    static async insert(item: SyncQueueItem, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
         const sql = `
             INSERT INTO sync_queue (
                 id, entity_type, entity_id, operation,
@@ -32,7 +34,7 @@ export class SyncQueueRepository {
                 created_at, synced_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
-        await db.execute(sql, [
+        await runner.execute(sql, [
             item.id,
             item.entity_type,
             item.entity_id,

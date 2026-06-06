@@ -226,6 +226,13 @@ export default function HomeScreen() {
       <View style={s.topAccent} />
 
       <Animated.View style={[s.inner, { opacity: fadeIn, transform: [{ translateY: slideUp }] }]}>
+        
+        {/* ── Top right support icon ── */}
+        <View style={s.topRightAction}>
+          <Pressable onPress={() => router.push('/recovery' as any)} accessibilityRole="button" accessibilityLabel="Account Recovery">
+            <Text style={{ fontSize: 24 }}>💬</Text>
+          </Pressable>
+        </View>
 
         {/* ── Brand line ── */}
         <View style={s.brandRow}>
@@ -309,6 +316,13 @@ const s = StyleSheet.create({
     paddingTop: T.sp24,
     paddingBottom: T.sp16,
     justifyContent: 'space-between',
+    position: 'relative',
+  },
+  topRightAction: {
+    position: 'absolute',
+    top: T.sp24,
+    right: T.sp24,
+    zIndex: 100,
   },
 
   // Brand

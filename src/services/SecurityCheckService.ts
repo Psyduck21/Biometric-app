@@ -26,14 +26,49 @@ export class SecurityCheckService {
      * @returns SecurityReport — isSafe is true only if ALL checks pass.
      */
     async checkAll(): Promise<SecurityReport> {
-        const rooted = await this.isRooted();
-        const debuggerAttached = this.isDebuggerAttached();
-        const emulator = this.isEmulator();
+        const [rooted, rawDebuggerAttached] = await Promise.all([
+            this.isRooted(),
+            this.isDebuggerAttached()
+        ]);
+        const rawEmulator = this.isEmulator();
+
+        let offlineLocked = false;
+        let debuggerAttached = rawDebuggerAttached;
+        let emulator = rawEmulator;
+
+        try {
+            const { TimeService } = require('./TimeService');
+            const { ConfigRepository } = require('../database/repositories/ConfigRepository');
+            
+            // Check debug overrides
+            const allowDebugger = await ConfigRepository.getBoolean('allow_debugger', false);
+            const allowEmulator = await ConfigRepository.getBoolean('allow_emulator', false);
+            
+            // Use only explicit dynamic overrides
+            if (allowDebugger) debuggerAttached = false;
+            if (allowEmulator) emulator = false;
+
+            const lastSync = await ConfigRepository.getNumber('last_successful_sync');
+            const maxOfflineHours = await ConfigRepository.getNumber('max_offline_hours', 72);
+            if (lastSync) {
+                const now = await TimeService.now();
+                const offlineHours = (now - lastSync) / 3600000;
+                if (offlineHours > maxOfflineHours) {
+                    console.warn(`[SecurityCheckService] Offline Window Exceeded: ${offlineHours.toFixed(1)} hours offline.`);
+                    offlineLocked = true;
+                }
+            }
+        } catch (e) {
+            console.warn('[SecurityCheckService] Time manipulation detected or error checking config:', e);
+            offlineLocked = true; // Fail closed if time is tampered
+        }
+
         return {
             isRooted: rooted,
             isDebuggerAttached: debuggerAttached,
             isEmulator: emulator,
-            isSafe: !rooted && !debuggerAttached && !emulator,
+            isOfflineLocked: offlineLocked,
+            isSafe: !rooted && !debuggerAttached && !emulator && !offlineLocked,
         };
     }
 

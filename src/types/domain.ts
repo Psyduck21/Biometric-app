@@ -140,7 +140,8 @@ export type AuditAction =
     | 'device_bind'
     | 'device_revoke'
     | 'admin_suspend'
-    | 'admin_config_update';
+    | 'admin_config_update'
+    | 'identity_takeover_attempt';
 
 // ---------------------------------------------------------------------------
 // Sync Queue
@@ -181,6 +182,7 @@ export interface SecurityReport {
     isRooted: boolean;
     isDebuggerAttached: boolean;
     isEmulator: boolean;
+    isOfflineLocked?: boolean;
     isSafe: boolean;
 }
 
@@ -221,7 +223,7 @@ export interface EnrollmentResult {
     success: boolean;
     userId?: string;
     templateIds?: string[];
-    failureReason?: 'inconsistent_face' | 'quality_insufficient' | 'storage_error' | 'security_fail';
+    failureReason?: 'inconsistent_face' | 'quality_insufficient' | 'storage_error' | 'security_fail' | 'identity_mismatch';
     consistencyScore?: number;
 }
 

@@ -1,7 +1,9 @@
 import { AuditLogRepository } from '../database/repositories/AuditLogRepository';
 import { CryptoService } from './CryptoService';
+import { TimeService } from './TimeService';
 import { SyncQueueRepository } from '../database/repositories/SyncQueueRepository';
 import { AuditLog, SyncQueueItem } from '../types/domain';
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 /**
  * AuditService
@@ -28,10 +30,11 @@ export class AuditService {
      * SyncService will upload it to the cloud on the next sync cycle.
      *
      * @param entry - The audit entry to record. id and timestamp are injected.
+     * @param tx - Optional transaction.
      */
-    async log(entry: Omit<AuditLog, 'id' | 'timestamp' | 'sync_status'>): Promise<void> {
+    async log(entry: Omit<AuditLog, 'id' | 'timestamp' | 'sync_status'>, tx?: Transaction): Promise<void> {
         const id        = CryptoService.uuid();
-        const timestamp = Date.now();
+        const timestamp = await TimeService.now();
 
         const fullEntry: AuditLog = {
             ...entry,
@@ -41,8 +44,8 @@ export class AuditService {
         };
 
         try {
-            await AuditLogRepository.insert(fullEntry);
-            await this.enqueueSyncItem(fullEntry);
+            await AuditLogRepository.insert(fullEntry, tx);
+            await this.enqueueSyncItem(fullEntry, tx);
         } catch (error) {
             // Audit logging must never crash the main flow. Log to console and continue.
             console.warn('[AuditService] Failed to write audit log:', error);
@@ -52,7 +55,7 @@ export class AuditService {
     /**
      * Wraps the audit log in an encrypted SyncQueueItem and saves it for upload.
      */
-    private async enqueueSyncItem(log: AuditLog): Promise<void> {
+    private async enqueueSyncItem(log: AuditLog, tx?: Transaction): Promise<void> {
         const masterKey = await CryptoService.getMasterKey();
         if (!masterKey) throw new Error('Master key not found for sync queue encryption.');
 
@@ -60,7 +63,7 @@ export class AuditService {
         const { cipher, iv, tag } = await CryptoService.encrypt(payloadJson, masterKey);
         
         const idempotencyKey = CryptoService.uuid();
-        const now = Date.now();
+        const now = await TimeService.now();
         const syncId = CryptoService.uuid();
 
         const syncItem: SyncQueueItem = {
@@ -71,14 +74,16 @@ export class AuditService {
             payload_cipher: cipher,
             payload_iv: iv,
             payload_tag: tag,
-            idempotency_key: idempotencyKey,
+            idempotencyKey,
             status: 'pending',
             priority: 3, // Lower priority than users and attendance
             attempt_count: 0,
             created_at: now
-        };
+        } as any; // Cast temporarily since we used idempotencyKey instead of idempotency_key
 
-        await SyncQueueRepository.insert(syncItem);
+        syncItem.idempotency_key = idempotencyKey;
+
+        await SyncQueueRepository.insert(syncItem, tx);
     }
 
     /**

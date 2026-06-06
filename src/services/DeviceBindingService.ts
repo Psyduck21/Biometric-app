@@ -4,6 +4,7 @@ import { Platform } from 'react-native';
 import { CryptoService } from './CryptoService';
 import { DeviceBindingRepository } from '../database/repositories/DeviceBindingRepository';
 import { DeviceBinding } from '../types/domain';
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 /**
  * DeviceBindingService
@@ -63,22 +64,24 @@ export class DeviceBindingService {
      * idempotent — no error is thrown and the existing binding is returned.
      *
      * @param userId - The UUID of the user who was just enrolled.
+     * @param tx - Optional transaction.
      * @returns The newly created or pre-existing DeviceBinding record.
      */
-    async bindDevice(userId: string): Promise<DeviceBinding> {
+    async bindDevice(userId: string, tx?: Transaction): Promise<DeviceBinding> {
         const deviceId    = await this.getDeviceId();
-        const now         = Date.now();
+        const { TimeService } = require('./TimeService');
+        const now         = await TimeService.now();
         const bindingId   = CryptoService.uuid();
 
         // Check if a binding already exists (e.g., re-enrollment)
         const existing = await DeviceBindingRepository.findActive(userId, deviceId);
         if (existing) {
-            await DeviceBindingRepository.updateLastVerified(existing.id, now);
+            await DeviceBindingRepository.updateLastVerified(existing.id, now, tx);
             return existing;
         }
 
         // Before binding a NEW user to this device, revoke any OLD users bound to it
-        await DeviceBindingRepository.revokeAllForDevice(deviceId, 'device_reassigned', now);
+        await DeviceBindingRepository.revokeAllForDevice(deviceId, 'device_reassigned', now, tx);
 
         // Generate ECDSA P-256 key pair for this device binding
         let publicKey: string | undefined;
@@ -106,7 +109,7 @@ export class DeviceBindingService {
             is_active:         1,
         };
 
-        await DeviceBindingRepository.insert(binding);
+        await DeviceBindingRepository.insert(binding, tx);
         return binding;
     }
 
@@ -128,7 +131,8 @@ export class DeviceBindingService {
 
         if (!binding) return false;
 
-        await DeviceBindingRepository.updateLastVerified(binding.id, Date.now());
+        const { TimeService } = require('./TimeService');
+        await DeviceBindingRepository.updateLastVerified(binding.id, await TimeService.now());
         return true;
     }
 
@@ -142,7 +146,8 @@ export class DeviceBindingService {
      */
     async revokeBinding(userId: string, reason: string): Promise<void> {
         const deviceId = await this.getDeviceId();
-        await DeviceBindingRepository.revoke(userId, deviceId, reason, Date.now());
+        const { TimeService } = require('./TimeService');
+        await DeviceBindingRepository.revoke(userId, deviceId, reason, await TimeService.now());
     }
 
     /**

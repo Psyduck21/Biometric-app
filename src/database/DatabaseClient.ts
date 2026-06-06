@@ -1,5 +1,5 @@
 import { open } from '@op-engineering/op-sqlite';
-import type { DB } from '@op-engineering/op-sqlite';
+import type { DB, Transaction } from '@op-engineering/op-sqlite';
 
 class DatabaseClient {
     // private data members

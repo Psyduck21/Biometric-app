@@ -1,5 +1,6 @@
 import { dbClient } from '../DatabaseClient';
 import { FaceTemplate } from '../../types/domain';
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 /**
  * FaceTemplateRepository
@@ -15,18 +16,19 @@ export class FaceTemplateRepository {
      * Inserts a new face template row for a user.
      *
      * @param template - The fully populated FaceTemplate object to persist.
+     * @param tx - Optional transaction.
      * @throws If the INSERT fails (e.g., FK violation, duplicate id).
      */
-    static async insert(template: FaceTemplate): Promise<void> {
-        const db = dbClient.getDb();
+    static async insert(template: FaceTemplate, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
         const sql = `
             INSERT INTO face_templates (
                 id, user_id, embedding_cipher, embedding_iv, embedding_tag,
                 quality_score, capture_index, model_version,
-                created_at, is_active, sync_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, is_active, sync_status, template_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
-        await db.execute(sql, [
+        await runner.execute(sql, [
             template.id,
             template.user_id,
             template.embedding_cipher,
@@ -38,6 +40,7 @@ export class FaceTemplateRepository {
             template.created_at,
             template.is_active,
             template.sync_status,
+            template.template_type || 'master',
         ]);
         console.log(`[FaceTemplateRepository] Successfully saved template ${template.id} for user ${template.user_id} to SQLite.`);
     }
@@ -85,10 +88,11 @@ export class FaceTemplateRepository {
      * Does NOT delete rows — the history is preserved for audit purposes.
      *
      * @param userId - The user whose templates should be deactivated.
+     * @param tx - Optional transaction.
      */
-    static async revokeAllForUser(userId: string): Promise<void> {
-        const db = dbClient.getDb();
-        await db.execute(
+    static async revokeAllForUser(userId: string, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
+        await runner.execute(
             'UPDATE face_templates SET is_active = 0 WHERE user_id = ?',
             [userId]
         );
@@ -98,10 +102,11 @@ export class FaceTemplateRepository {
      * Marks a single template as synced in the sync_queue ledger.
      *
      * @param templateId - The UUID of the template to mark as synced.
+     * @param tx - Optional transaction.
      */
-    static async markSynced(templateId: string): Promise<void> {
-        const db = dbClient.getDb();
-        await db.execute(
+    static async markSynced(templateId: string, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
+        await runner.execute(
             "UPDATE face_templates SET sync_status = 'synced' WHERE id = ?",
             [templateId]
         );

@@ -1,5 +1,6 @@
 import { dbClient } from '../DatabaseClient';
 import { DeviceBinding } from '../../types/domain';
+import type { Transaction } from '@op-engineering/op-sqlite';
 
 /**
  * DeviceBindingRepository
@@ -17,9 +18,10 @@ export class DeviceBindingRepository {
      * UNIQUE INDEX idx_db_user_device.
      *
      * @param binding - The fully populated DeviceBinding object.
+     * @param tx - Optional transaction object.
      */
-    static async insert(binding: DeviceBinding): Promise<void> {
-        const db = dbClient.getDb();
+    static async insert(binding: DeviceBinding, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
         const sql = `
             INSERT INTO device_bindings (
                 id, user_id, device_id, device_model, os_version, app_version,
@@ -27,7 +29,7 @@ export class DeviceBindingRepository {
                 last_verified_at, is_active, revoked_at, revoke_reason
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
-        await db.execute(sql, [
+        await runner.execute(sql, [
             binding.id,
             binding.user_id,
             binding.device_id,
@@ -95,10 +97,11 @@ export class DeviceBindingRepository {
         userId: string,
         deviceId: string,
         reason: string,
-        nowEpoch: number
+        nowEpoch: number,
+        tx?: Transaction
     ): Promise<void> {
-        const db = dbClient.getDb();
-        await db.execute(
+        const runner = tx || dbClient.getDb();
+        await runner.execute(
             `UPDATE device_bindings
              SET is_active = 0, revoked_at = ?, revoke_reason = ?
              WHERE user_id = ? AND device_id = ?`,
@@ -113,10 +116,11 @@ export class DeviceBindingRepository {
     static async revokeAllForDevice(
         deviceId: string,
         reason: string,
-        nowEpoch: number
+        nowEpoch: number,
+        tx?: Transaction
     ): Promise<void> {
-        const db = dbClient.getDb();
-        await db.execute(
+        const runner = tx || dbClient.getDb();
+        await runner.execute(
             `UPDATE device_bindings
              SET is_active = 0, revoked_at = ?, revoke_reason = ?
              WHERE device_id = ? AND is_active = 1`,
@@ -130,9 +134,9 @@ export class DeviceBindingRepository {
      * @param bindingId - The UUID of the binding record to update.
      * @param nowEpoch  - Current Unix epoch milliseconds.
      */
-    static async updateLastVerified(bindingId: string, nowEpoch: number): Promise<void> {
-        const db = dbClient.getDb();
-        await db.execute(
+    static async updateLastVerified(bindingId: string, nowEpoch: number, tx?: Transaction): Promise<void> {
+        const runner = tx || dbClient.getDb();
+        await runner.execute(
             'UPDATE device_bindings SET last_verified_at = ? WHERE id = ?',
             [nowEpoch, bindingId]
         );
