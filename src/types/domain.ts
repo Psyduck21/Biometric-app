@@ -154,7 +154,7 @@ export type AuditAction =
  */
 export interface SyncQueueItem {
     id: string;
-    entity_type: 'attendance' | 'user' | 'face_template' | 'audit_log';
+    entity_type: 'attendance' | 'user' | 'face_template' | 'audit_log' | 'device_binding';
     entity_id: string;
     operation: 'create' | 'update' | 'delete';
     payload_cipher: string;
