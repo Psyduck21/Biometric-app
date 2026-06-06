@@ -12,7 +12,7 @@ import { Camera, useCameraDevice, useCameraPermission, useFrameOutput } from 're
 import { useResizer } from 'react-native-vision-camera-resizer';
 import { createSynchronizable, runOnJS } from 'react-native-worklets';
 // removed reanimated import
-import { useFaceDetector } from 'react-native-vision-camera-face-detector';
+import { Face, useFaceDetector } from 'react-native-vision-camera-face-detector';
 import { Asset } from 'expo-asset';
 
 import { T } from '../design-system/theme2';
@@ -163,6 +163,10 @@ export function BiometricScannerCore({
         frame.dispose();
         return;
       }
+      if (!faceDetector || !antispoofing || !mobilefacenet || !baseResizer) {
+        frame.dispose();
+        return;
+      }
 
       const now = Date.now();
       
@@ -181,10 +185,14 @@ export function BiometricScannerCore({
       }
 
       try {
-        if (!baseResizer) return;
         isProcessing.setBlocking(true);
 
-        const faces = faceDetector.detectFaces(frame);
+        let faces: Face[] = [];
+        try {
+          faces = faceDetector.detectFaces(frame);
+        } catch (e) {
+          runOnJS(safeLog)(`Face detection failed: ${String(e)}`);
+        }
 
         if (faces.length === 0) {
           isProcessing.setBlocking(false);
