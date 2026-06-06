@@ -13,6 +13,7 @@ import { useResizer } from 'react-native-vision-camera-resizer';
 import { createSynchronizable, runOnJS } from 'react-native-worklets';
 import { useSharedValue } from 'react-native-reanimated';
 import { useFaceDetector } from 'react-native-vision-camera-face-detector';
+import { Asset } from 'expo-asset';
 
 import { T } from '../design-system/theme2';
 import { processAntiSpoofingOutput } from '../services/ai/AntiSpoofingService';
@@ -62,7 +63,7 @@ export interface BiometricScannerProps {
 }
 
 // ── BiometricScanner ─────────────────────────────────────────────────────
-export default function BiometricScanner({
+export function BiometricScannerCore({
   mode,
   captured,
   requiredCaptures,
@@ -70,7 +71,9 @@ export default function BiometricScanner({
   error,
   onLivenessPassed,
   onCapture,
-}: BiometricScannerProps) {
+  antiUri,
+  faceNetUri,
+}: BiometricScannerProps & { antiUri: string, faceNetUri: string }) {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('front');
 
@@ -94,9 +97,12 @@ export default function BiometricScanner({
     pixelLayout: 'interleaved'
   });
 
-  // Load TensorFlow models
-  const antispoofing = useTensorflowModel(require('../../assets/models/antispoofing/2.7_80x80_MiniFASNetV2.tflite'), []);
-  const mobilefacenet = useTensorflowModel(require('../../assets/models/mobilefacenet/mobilefacenet.tflite'), []);
+  // Load TensorFlow models via file:// URI (resolved by parent)
+  const antiSource = useMemo(() => ({ url: antiUri }), [antiUri]);
+  const faceNetSource = useMemo(() => ({ url: faceNetUri }), [faceNetUri]);
+  
+  const antispoofing = useTensorflowModel(antiSource, []);
+  const mobilefacenet = useTensorflowModel(faceNetSource, []);
   const isModelsReady = useMemo(() => !!antispoofing.model && !!mobilefacenet.model, [antispoofing.model, mobilefacenet.model]);
 
   // Processing state
@@ -213,10 +219,6 @@ export default function BiometricScanner({
         const mappedW = expandedSize * scale;
         const mappedH = expandedSize * scale;
 
-        const baseFrame = baseResizer.resize(frame);
-        const baseRaw = new Float32Array(baseFrame.getPixelBuffer());
-        baseFrame.dispose();
-
         if (stage === 'liveness') {
           // Update capture timestamp for FPS throttling
           lastCaptureTime.value = Date.now();
@@ -225,6 +227,10 @@ export default function BiometricScanner({
         } else if (stage === 'capture') {
           // Update capture timestamp immediately
           lastCaptureTime.value = Date.now();
+
+          const baseFrame = baseResizer.resize(frame);
+          const baseRaw = new Float32Array(baseFrame.getPixelBuffer());
+          baseFrame.dispose();
 
           // AntiSpoofing
           const smArray = cropAndScaleTensor(baseRaw, 512, 512, mappedX, mappedY, mappedW, mappedH, 80, 80, '[0, 255]');
@@ -324,6 +330,36 @@ export default function BiometricScanner({
       )}
     </View>
   );
+}
+
+export default function BiometricScanner(props: BiometricScannerProps) {
+  const [antiUri, setAntiUri] = useState<string | null>(null);
+  const [faceNetUri, setFaceNetUri] = useState<string | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [antiAsset] = await Asset.loadAsync(require('../../assets/models/antispoofing/2.7_80x80_MiniFASNetV2.tflite'));
+        const [faceAsset] = await Asset.loadAsync(require('../../assets/models/mobilefacenet/mobilefacenet.tflite'));
+        // localUri gives us a file:// path that java.net.URL can actually read
+        setAntiUri(antiAsset.localUri || antiAsset.uri);
+        setFaceNetUri(faceAsset.localUri || faceAsset.uri);
+      } catch (e) {
+        console.error("Failed to load local asset URIs", e);
+      }
+    })();
+  }, []);
+
+  if (!antiUri || !faceNetUri) {
+    return (
+      <View style={{ flex: 1, backgroundColor: T.black, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator color={T.yellow} size="large" />
+        <Text style={{ color: T.white, marginTop: T.sp16, fontFamily: T.font, fontSize: T.fs16 }}>Loading AI Models...</Text>
+      </View>
+    );
+  }
+
+  return <BiometricScannerCore {...props} antiUri={antiUri} faceNetUri={faceNetUri} />;
 }
 
 const s = StyleSheet.create({
