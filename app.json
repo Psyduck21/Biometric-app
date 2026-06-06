@@ -58,7 +58,8 @@
             "newArchEnabled": true
           }
         }
-      ]
+      ],
+      "./withLargeHeap.js"
     ],
     "experiments": {
       "typedRoutes": true,
