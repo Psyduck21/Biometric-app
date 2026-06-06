@@ -25,3 +25,27 @@ index 5b93f23..a6e2ce2 100644
  #include <worklets/RunLoop/AsyncQueue.h>
  #elif __has_include(<RNWorklets/worklets/RunLoop/AsyncQueue.h>)
  #include <RNWorklets/worklets/RunLoop/AsyncQueue.h>
+diff --git a/node_modules/react-native-vision-camera-worklets/lib/createWorkletRuntimeForThread.js b/node_modules/react-native-vision-camera-worklets/lib/createWorkletRuntimeForThread.js
+index 085729f..64ec062 100644
+--- a/node_modules/react-native-vision-camera-worklets/lib/createWorkletRuntimeForThread.js
++++ b/node_modules/react-native-vision-camera-worklets/lib/createWorkletRuntimeForThread.js
+@@ -10,6 +10,7 @@ import { HybridWorkletQueueFactory } from './internal/HybridWorkletQueueFactory'
+  * on the Camera pipeline's thread without context switching.
+  */
+ export function createWorkletRuntimeForThread(thread) {
++    globalThis.__WORKLET_QUEUE_FACTORY = HybridWorkletQueueFactory;
+     const workletQueue = HybridWorkletQueueFactory.wrapThreadInQueue(thread);
+     return createWorkletRuntime({
+         name: thread.id,
+diff --git a/node_modules/react-native-vision-camera-worklets/src/createWorkletRuntimeForThread.ts b/node_modules/react-native-vision-camera-worklets/src/createWorkletRuntimeForThread.ts
+index 82a306b..68aa0b5 100644
+--- a/node_modules/react-native-vision-camera-worklets/src/createWorkletRuntimeForThread.ts
++++ b/node_modules/react-native-vision-camera-worklets/src/createWorkletRuntimeForThread.ts
+@@ -17,6 +17,7 @@ import { HybridWorkletQueueFactory } from './internal/HybridWorkletQueueFactory'
+ export function createWorkletRuntimeForThread(
+   thread: NativeThread,
+ ): WorkletRuntime {
++  (globalThis as any).__WORKLET_QUEUE_FACTORY = HybridWorkletQueueFactory
+   const workletQueue = HybridWorkletQueueFactory.wrapThreadInQueue(thread)
+ 
+   return createWorkletRuntime({

@@ -24,6 +24,7 @@ export class SyncService {
     private isRunning = false;
     private isOnline = true;
     private netInfoUnsubscribe?: NetInfoSubscription;
+    private appStateSubscription?: { remove: () => void };
     private syncIntervalId?: ReturnType<typeof setInterval>;
 
     private static SYNC_INTERVAL_MS = 60000; // 1 minute
@@ -50,7 +51,7 @@ export class SyncService {
         }
 
         // Monitor AppState to trigger eager sync when foregrounded
-        AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
+        this.appStateSubscription = AppState.addEventListener('change', (nextAppState: AppStateStatus) => {
             if (nextAppState === 'active' && this.isOnline) {
                 console.log('[SyncService] App foregrounded. Triggering immediate sync.');
                 this.syncBatch();
@@ -95,6 +96,10 @@ export class SyncService {
         if (this.netInfoUnsubscribe) {
             this.netInfoUnsubscribe();
             this.netInfoUnsubscribe = undefined;
+        }
+        if (this.appStateSubscription) {
+            this.appStateSubscription.remove();
+            this.appStateSubscription = undefined;
         }
         if (this.syncIntervalId) {
             clearInterval(this.syncIntervalId);
