@@ -180,6 +180,7 @@ export interface SyncQueueItem {
 export interface SecurityReport {
     isRooted: boolean;
     isDebuggerAttached: boolean;
+    isEmulator: boolean;
     isSafe: boolean;
 }
 
