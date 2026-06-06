@@ -59,7 +59,8 @@
           }
         }
       ],
-      "./withLargeHeap.js"
+      "./withLargeHeap.js",
+      "./withProductionHarden.js"
     ],
     "experiments": {
       "typedRoutes": true,
