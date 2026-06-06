@@ -12,13 +12,9 @@ import { SecurityReport } from '../types/domain';
  *   1. Root detection (Android) — looks for su binary locations and build-tag
  *   2. Jailbreak detection (iOS) — checks for Cydia, symlinks, and writable paths
  *   3. Debugger attachment detection — uses __DEV__ and device flags
+ *   4. Emulator detection — using expo-device flags
  *
- * This implementation is a pure JavaScript heuristic layer. For production
- * hardening (Sprint 6), this should be complemented by SafetyNet Attestation
- * (Android) and DeviceCheck (iOS) which verify the device integrity via
- * Google/Apple servers.
- *
- * Reference: OWASP Mobile Top 10, M8 — Security Misconfiguration
+ * This implementation is a pure JavaScript heuristic layer.
  */
 export class SecurityCheckService {
 
@@ -27,50 +23,30 @@ export class SecurityCheckService {
      *
      * All individual checks run even if one fails so that the caller gets a
      * complete picture of device integrity in a single call.
-     *
      * @returns SecurityReport — isSafe is true only if ALL checks pass.
      */
     async checkAll(): Promise<SecurityReport> {
         const rooted = await this.isRooted();
         const debuggerAttached = this.isDebuggerAttached();
-
+        const emulator = this.isEmulator();
         return {
             isRooted: rooted,
             isDebuggerAttached: debuggerAttached,
-            isSafe: !rooted && !debuggerAttached,
+            isEmulator: emulator,
+            isSafe: !rooted && !debuggerAttached && !emulator,
         };
     }
 
     /**
      * Checks whether the device is rooted (Android) or jailbroken (iOS).
-     *
-     * Android signals:
-     *   - Device.isRootedExperimentalAsync() — Expo Device module
-     *   - isDevice = false (emulator running in CI may trigger false positives)
-     *
-     * iOS signals:
-     *   - Same Expo Device flag (detects Cydia install path existence)
-     *
-     * The Expo Device module calls native APIs under the hood:
-     *   - Android: checks Build.TAGS for 'test-keys', scans common su paths
-     *   - iOS: checks for Cydia.app, SpringBoard write access
-     *
-     * @returns true if rooting/jailbreaking is detected.
      */
     async isRooted(): Promise<boolean> {
         try {
-            // isRootedExperimentalAsync is available on expo-device >= 5.x
             if (typeof Device.isRootedExperimentalAsync === 'function') {
                 const rooted = await Device.isRootedExperimentalAsync();
                 if (rooted) return true;
             }
-
-            // Emulators/simulators should be treated as unsafe in production.
-            // Comment out the next line during development if running on a simulator.
-            // if (!Device.isDevice) return true;
-
         } catch (error) {
-            // If the check itself fails (e.g., permission issue), fail closed.
             console.warn('[SecurityCheckService] isRooted check failed:', error);
             return true;
         }
@@ -79,25 +55,23 @@ export class SecurityCheckService {
     }
 
     /**
-     * Detects if a JavaScript debugger is connected to the app.
-     *
-     * In React Native, __DEV__ is true in both debug and release builds during
-     * local development. In a production APK, __DEV__ is always false.
-     * We combine this with the isDevice flag to avoid false positives on emulators.
-     *
-     * @returns true if running in a debug/dev environment.
+     * Detects if the app is running on an emulator/simulator.
+     * Emulators are often used to spoof camera feeds or GPS coordinates.
      */
-    isDebuggerAttached(): boolean {
-        // In a production build, __DEV__ is always false
-        // return typeof __DEV__ !== 'undefined' && __DEV__ === true;
-        return false;
+    isEmulator(): boolean {
+        // If it's not a physical device, treat it as an emulator
+        return !Device.isDevice;
     }
 
     /**
-     * Returns the platform string for logging and audit purposes.
+     * Detects if a JavaScript debugger is connected to the app.
      *
-     * @returns 'android' or 'ios'
+     * In a production APK, __DEV__ is always false.
      */
+    isDebuggerAttached(): boolean {
+        return typeof __DEV__ !== 'undefined' && __DEV__ === true;
+    }
+
     getPlatform(): string {
         return Platform.OS;
     }
