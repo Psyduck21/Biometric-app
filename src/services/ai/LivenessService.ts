@@ -135,10 +135,10 @@ export class LivenessService {
         this.pitchHistory = [];
         this.yawHistory = [];
 
-        console.log(
-            '[LivenessService] Session started. Challenges:',
-            this.challenges.map(c => c.type).join(' → ')
-        );
+        // console.log(
+        //     '[LivenessService] Session started. Challenges:',
+        //     this.challenges.map(c => c.type).join(' → ')
+        // );
     }
 
     /**

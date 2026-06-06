@@ -72,7 +72,7 @@ export class ApiService {
         const timeoutId = setTimeout(() => controller.abort(), ApiService.DEFAULT_TIMEOUT_MS);
 
         try {
-            console.log(`[ApiService] ${method} ${url}`);
+            // console.log(`[ApiService] ${method} ${url}`);
 
             const response = await fetch(url, {
                 method,

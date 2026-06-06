@@ -131,8 +131,8 @@ export class EnrollmentService {
             captureIndex: session.capturedSamples + 1,
         };
 
-        console.log(`[Enrollment] Capture ${sample.captureIndex} complete.`);
-        console.log(`[Enrollment] Embedding generated (512D)`);
+        // console.log(`[Enrollment] Capture ${sample.captureIndex} complete.`);
+        // console.log(`[Enrollment] Embedding generated (512D)`);
 
         session.samples.push(sample);
         session.capturedSamples += 1;
@@ -247,7 +247,7 @@ export class EnrollmentService {
             // 2. Filter outliers (embeddings furthest from centroid)
             const validSamples = session.samples.filter((sample, idx) => {
                 const sim = this._cosineSimilarity(centroid, sample.embedding);
-                console.log(`[Enrollment] Sample ${idx + 1} centroid similarity: ${sim.toFixed(4)}`);
+                // console.log(`[Enrollment] Sample ${idx + 1} centroid similarity: ${sim.toFixed(4)}`);
                 return sim > 0.65; // High threshold for outlier rejection
             });
 
@@ -471,7 +471,7 @@ export class EnrollmentService {
         for (let i = 0; i < samples.length; i++) {
             for (let j = i + 1; j < samples.length; j++) {
                 const sim = this._cosineSimilarity(samples[i].embedding, samples[j].embedding);
-                console.log(`[Enrollment] Similarity Sample ${i+1} <-> Sample ${j+1}: ${sim.toFixed(4)}`);
+                // console.log(`[Enrollment] Similarity Sample ${i+1} <-> Sample ${j+1}: ${sim.toFixed(4)}`);
                 if (sim < minSim) minSim = sim;
             }
         }
