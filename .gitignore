@@ -47,4 +47,4 @@ system-design/
 /biometric/release
 /biometric/.vscode
 /biometric/.claude
-/biometric/.env
+.env
