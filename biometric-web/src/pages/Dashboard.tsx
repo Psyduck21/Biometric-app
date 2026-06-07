@@ -10,16 +10,22 @@ const Dashboard = () => {
   useEffect(() => {
     fetchDashboardData();
 
-    // Setup realtime subscription
+    // Setup realtime subscriptions for dashboard metrics
     const subscription = supabase
-      .channel('attendance_changes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'attendance' }, () => {
-        fetchDashboardData(); // Refresh on new attendance
+      .channel('dashboard_metrics')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
+        fetchDashboardData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        fetchDashboardData();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_bindings' }, () => {
+        fetchDashboardData();
       })
       .subscribe();
 
     return () => {
-      subscription.unsubscribe();
+      supabase.removeChannel(subscription);
     };
   }, []);
 

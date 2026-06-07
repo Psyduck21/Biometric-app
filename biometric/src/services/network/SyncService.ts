@@ -300,15 +300,20 @@ export class SyncService {
                 });
                 
                 if (response.success && response.data) {
-                    const cloudStatus = response.data.status;
-                    const activeCloudTemplates = response.data.active_templates;
-                    const isBindingActive = response.data.binding_active;
+                    const payload = (response.data as any).data || response.data;
+                    const cloudStatus = payload.status;
+                    const activeCloudTemplates = payload.active_templates;
+                    const isBindingActive = payload.binding_active;
                     
                     // 0. Check for Revoked Device Binding
                     if (isBindingActive === false) {
                         console.log(`[SyncService] Device binding revoked from cloud! Wiping local binding and logging out.`);
                         const { deviceBindingService } = require('../DeviceBindingService');
-                        await deviceBindingService.clearBinding();
+                        await deviceBindingService.revokeBinding(binding.user_id, 'Cloud Revoked');
+                        
+                        // Wipe sensitive local biometric templates immediately
+                        const { FaceTemplateRepository } = require('../../database/repositories/FaceTemplateRepository');
+                        await FaceTemplateRepository.revokeAllForUser(binding.user_id);
                         
                         const { store } = require('../../store');
                         const { logout } = require('../../store/slices/authSlices');

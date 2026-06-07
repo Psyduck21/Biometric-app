@@ -10,6 +10,20 @@ const Security = () => {
 
   useEffect(() => {
     fetchSecurityData();
+
+    const channel = supabase
+      .channel('security_table_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'device_bindings' }, () => {
+        fetchSecurityData();
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'audit_logs' }, () => {
+        fetchSecurityData();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchSecurityData = async () => {

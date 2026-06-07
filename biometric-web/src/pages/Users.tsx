@@ -10,6 +10,17 @@ const Users = () => {
 
   useEffect(() => {
     fetchUsers();
+
+    const channel = supabase
+      .channel('users_table_changes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () => {
+        fetchUsers();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const fetchUsers = async () => {
