@@ -316,7 +316,7 @@ export class SyncService {
                         const activeLocal = await FaceTemplateRepository.getActive(binding.user_id);
                         if (activeLocal.length > 0) {
                             console.log(`[SyncService] Hard Reset detected from cloud! Deactivating local templates and logging out.`);
-                            await FaceTemplateRepository.deactivateAll(binding.user_id);
+                            await FaceTemplateRepository.revokeAllForUser(binding.user_id);
                             
                             // Force app to re-evaluate state (pushes to enrollment)
                             const { store } = require('../../store');
