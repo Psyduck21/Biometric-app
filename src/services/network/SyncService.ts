@@ -116,7 +116,22 @@ export class SyncService {
 
         try {
             const pendingItems = await SyncQueueRepository.getPending(SyncService.BATCH_SIZE, Date.now());
-            if (pendingItems.length === 0) return;
+            if (pendingItems.length === 0) {
+                const { ConfigRepository } = require('../../database/repositories/ConfigRepository');
+                const lastSync = await ConfigRepository.getNumber('last_successful_sync', 0);
+                
+                // Throttle heartbeat: Only ping the API if it's been more than 12 hours since the last sync
+                // This minimizes background pings to just twice a day when idle
+                if (Date.now() - lastSync > 43200000) {
+                    const ping = await apiService.get('');
+                    if (ping.status >= 200 && ping.status < 500) {
+                        const { TimeService } = require('../TimeService');
+                        await TimeService.clearTamperFlag();
+                        await ConfigRepository.setNumber('last_successful_sync', Date.now());
+                    }
+                }
+                return;
+            }
 
             console.log(`[SyncService] Syncing batch of ${pendingItems.length} items...`);
 

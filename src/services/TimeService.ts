@@ -8,7 +8,6 @@ import { ConfigRepository } from '../database/repositories/ConfigRepository';
  * by comparing monotonic uptime (performance.now()) against the OS clock delta.
  */
 export class TimeService {
-    private static lastPerformanceNow: number = performance.now();
     private static lastOsTime: number = Date.now();
 
     /**
@@ -26,7 +25,6 @@ export class TimeService {
             await ConfigRepository.setNumber('last_seen_time', now);
         }
         
-        this.lastPerformanceNow = performance.now();
         this.lastOsTime = Date.now();
     }
 
@@ -35,20 +33,14 @@ export class TimeService {
      * If the clock was tampered with, this will throw an error or return a flagged timestamp.
      */
     static async now(): Promise<number> {
-        const currentPerf = performance.now();
         const currentOs = Date.now();
 
-        const perfDelta = currentPerf - this.lastPerformanceNow;
-        const osDelta = currentOs - this.lastOsTime;
-
-        // If the OS clock moved significantly more or less than the monotonic performance clock (e.g., > 10 seconds difference)
-        // it means the user changed the device clock while the app was running in the background.
-        if (Math.abs(osDelta - perfDelta) > 10000) {
-            console.error('[TimeService] TIME TAMPERING DETECTED during active session!');
+        // 1. Backward time jump check (user set clock to the past)
+        if (currentOs < this.lastOsTime) {
+            console.error(`[TimeService] TIME TAMPERING DETECTED! Clock moved backwards. currentOs: ${currentOs}, lastOsTime: ${this.lastOsTime}`);
             await ConfigRepository.setBoolean('time_tampered', true);
         }
 
-        this.lastPerformanceNow = currentPerf;
         this.lastOsTime = currentOs;
         
         // Update last seen time for future cold starts
@@ -68,7 +60,6 @@ export class TimeService {
      */
     static async clearTamperFlag(): Promise<void> {
         await ConfigRepository.setBoolean('time_tampered', false);
-        this.lastPerformanceNow = performance.now();
         this.lastOsTime = Date.now();
         await ConfigRepository.setNumber('last_seen_time', this.lastOsTime);
     }
