@@ -66,14 +66,24 @@ export class EnrollmentService {
     async startEnrollment(userId: string): Promise<EnrollmentSession> {
         const security = await securityCheckService.checkAll();
         if (!security.isSafe) {
+            let specificReason = 'device_compromised';
+            if (security.isOfflineLocked) specificReason = 'time_tampering_or_offline';
+            else if (security.isRooted) specificReason = 'rooted_device';
+            else if (security.isEmulator) specificReason = 'emulator_detected';
+            else if (security.isDebuggerAttached) specificReason = 'debugger_attached';
+
             await auditService.log({
                 user_id:        userId,
-                action:         'enroll_fail',
-                outcome:        'blocked',
-                failure_reason: 'security_check_failed',
+                action:         'security_check',
+                outcome:        'failure',
+                failure_reason: specificReason,
                 metadata:       JSON.stringify(security),
             });
-            throw new Error('Device failed security check: root or debugger detected.');
+            
+            const { syncService } = require('./network/SyncService');
+            syncService.syncBatch().catch((e: any) => console.error(e));
+
+            throw new Error(`Device failed security check: ${specificReason}`);
         }
 
         const sessionId = CryptoService.uuid();

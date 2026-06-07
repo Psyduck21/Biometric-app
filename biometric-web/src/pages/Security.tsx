@@ -16,7 +16,7 @@ const Security = () => {
     setLoading(true);
     try {
       const [devRes, logsRes] = await Promise.all([
-        supabase.from('device_bindings').select('*, users(full_name, employee_id)').eq('is_active', 1),
+        supabase.from('device_bindings').select('*, users(full_name, employee_id)').eq('is_active', true),
         supabase.from('audit_logs').select('*').order('timestamp', { ascending: false }).limit(20)
       ]);
 

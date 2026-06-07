@@ -12,7 +12,7 @@ export interface AuthResult {
     sessionId?: string;
     similarityScore?: number;
     livenessScore?: number;
-    failureReason?: 'no_match' | 'device_mismatch' | 'locked' | 'storage_error' | 'offline_locked' | 'security_violation';
+    failureReason?: 'no_match' | 'device_mismatch' | 'locked' | 'storage_error' | 'offline_locked' | 'security_violation' | 'suspended';
     attemptsRemaining?: number;
 }
 
@@ -28,11 +28,33 @@ export class AuthenticationService {
     async authenticate(queryEmbedding: Float32Array, livenessScore: number): Promise<AuthResult> {
         const deviceId = await deviceBindingService.getDeviceId();
         
+        // Try to identify user for logging purposes (safe if null)
+        const logBinding = await deviceBindingService.getBindingForCurrentDevice();
+        const logUserId = logBinding ? logBinding.user_id : undefined;
+
         // 0. Security Gate Check
         const { securityCheckService } = require('./SecurityCheckService');
         const securityReport = await securityCheckService.checkAll();
         if (!securityReport.isSafe) {
             console.warn('[AuthenticationService] Security check failed during auth:', securityReport);
+            
+            let specificReason = 'device_compromised';
+            if (securityReport.isOfflineLocked) specificReason = 'time_tampering_or_offline';
+            else if (securityReport.isRooted) specificReason = 'rooted_device';
+            else if (securityReport.isEmulator) specificReason = 'emulator_detected';
+            else if (securityReport.isDebuggerAttached) specificReason = 'debugger_attached';
+
+            await auditService.log({
+                user_id: logUserId,
+                action: 'security_check',
+                outcome: 'failure',
+                failure_reason: specificReason,
+                metadata: JSON.stringify(securityReport),
+            });
+            
+            // Force sync so the web dashboard sees the alert immediately
+            syncService.syncBatch().catch(e => console.error(e));
+
             return {
                 success: false,
                 failureReason: securityReport.isOfflineLocked ? 'offline_locked' : 'security_violation',
@@ -50,13 +72,31 @@ export class AuthenticationService {
         }
 
         // 2. Identify User on Device
-        const binding = await deviceBindingService.getBindingForCurrentDevice();
-        if (!binding) {
+        if (!logBinding) {
             await this.handleFailure(deviceId, 'device_mismatch');
             return { success: false, failureReason: 'device_mismatch' };
         }
         
-        const userId = binding.user_id;
+        const userId = logBinding.user_id;
+
+        // 2b. Check if user is suspended
+        const { UserRepository } = require('../database/repositories/UserRepository');
+        const localUser = await UserRepository.getUserById(userId);
+        if (localUser && localUser.status === 'suspended') {
+            await auditService.log({
+                user_id: userId,
+                action: 'auth_fail',
+                outcome: 'blocked',
+                failure_reason: 'account_suspended',
+                metadata: JSON.stringify({ note: 'User attempted login while suspended.' }),
+            });
+            syncService.syncBatch().catch(e => console.error(e));
+            return {
+                success: false,
+                failureReason: 'suspended',
+                attemptsRemaining: 0,
+            };
+        }
 
         // 3. Retrieve and Decrypt Templates
         let masterKey: string;

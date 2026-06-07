@@ -16,12 +16,16 @@ const Layout = () => {
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-brand">
-          <div style={{ position: 'relative', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <img src="/simple_face.png" style={{ width: '100%', height: '100%', objectFit: 'contain', zIndex: 1 }} alt="Aegis" />
-            <div style={{ position: 'absolute', top: 0, left: 0, width: '8px', height: '8px', borderTop: '2px solid var(--color-yellow)', borderLeft: '2px solid var(--color-yellow)', borderTopLeftRadius: '3px' }} />
-            <div style={{ position: 'absolute', top: 0, right: 0, width: '8px', height: '8px', borderTop: '2px solid var(--color-yellow)', borderRight: '2px solid var(--color-yellow)', borderTopRightRadius: '3px' }} />
-            <div style={{ position: 'absolute', bottom: 0, left: 0, width: '8px', height: '8px', borderBottom: '2px solid var(--color-yellow)', borderLeft: '2px solid var(--color-yellow)', borderBottomLeftRadius: '3px' }} />
-            <div style={{ position: 'absolute', bottom: 0, right: 0, width: '8px', height: '8px', borderBottom: '2px solid var(--color-yellow)', borderRight: '2px solid var(--color-yellow)', borderBottomRightRadius: '3px' }} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#f6d32d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-scan-face-icon lucide-scan-face">
+              <path d="M3 7V5a2 2 0 0 1 2-2h2"/>
+              <path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+              <path d="M21 17v2a2 2 0 0 1-2 2h-2"/>
+              <path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+              <path d="M8 14s1.5 2 4 2 4-2 4-2"/>
+              <path d="M9 9h.01"/>
+              <path d="M15 9h.01"/>
+            </svg>
           </div>
           Aegis Admin
         </div>

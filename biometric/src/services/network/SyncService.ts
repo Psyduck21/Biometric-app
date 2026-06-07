@@ -130,6 +130,7 @@ export class SyncService {
                         await ConfigRepository.setNumber('last_successful_sync', Date.now());
                     }
                 }
+                await this.syncUserStatus();
                 return;
             }
 
@@ -219,6 +220,8 @@ export class SyncService {
                 }
             }
 
+            await this.syncUserStatus();
+
         } catch (error: any) {
             console.error('[SyncService] Unexpected error during syncBatch:', error);
         }
@@ -273,6 +276,33 @@ export class SyncService {
             }
         } catch (error) {
             console.error(`[SyncService] Failed to check template updates for user ${userId}:`, error);
+        }
+    }
+
+    /**
+     * Checks the cloud for user status updates (e.g. if an admin suspended the user).
+     */
+    private async syncUserStatus(): Promise<void> {
+        if (!this.isOnline) return;
+        
+        try {
+            const { deviceBindingService } = require('../DeviceBindingService');
+            const { UserRepository } = require('../../database/repositories/UserRepository');
+            
+            const binding = await deviceBindingService.getBindingForCurrentDevice();
+            if (binding && binding.user_id) {
+                const response = await apiService.get<{ status: string }[]>(`/users?id=eq.${binding.user_id}&select=status`);
+                if (response.success && response.data && response.data.length > 0) {
+                    const cloudStatus = response.data[0].status;
+                    const localUser = await UserRepository.getUserById(binding.user_id);
+                    if (localUser && localUser.status !== cloudStatus) {
+                        console.log(`[SyncService] Cloud status changed from ${localUser.status} to ${cloudStatus}. Updating local database.`);
+                        await UserRepository.updateStatus(binding.user_id, cloudStatus as any);
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('[SyncService] Failed to sync user status:', error);
         }
     }
 }

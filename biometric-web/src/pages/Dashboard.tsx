@@ -28,9 +28,9 @@ const Dashboard = () => {
       const [checkinsRes, usersRes, devicesRes, alertsRes, logsRes] = await Promise.all([
         supabase.from('attendance').select('*', { count: 'exact', head: true }),
         supabase.from('users').select('*', { count: 'exact', head: true }).eq('status', 'active'),
-        supabase.from('device_bindings').select('*', { count: 'exact', head: true }).eq('is_active', 1),
+        supabase.from('device_bindings').select('*', { count: 'exact', head: true }).eq('is_active', true),
         supabase.from('audit_logs').select('*', { count: 'exact', head: true }).eq('outcome', 'failure'),
-        supabase.from('attendance').select('id, timestamp, similarity_score, device_id, sync_status, users(full_name)').order('timestamp', { ascending: false }).limit(5)
+        supabase.from('attendance').select('id, timestamp, similarity_score, device_id, users(full_name)').order('timestamp', { ascending: false }).limit(5)
       ]);
 
       setStats({

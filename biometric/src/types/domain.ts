@@ -141,7 +141,8 @@ export type AuditAction =
     | 'device_revoke'
     | 'admin_suspend'
     | 'admin_config_update'
-    | 'identity_takeover_attempt';
+    | 'identity_takeover_attempt'
+    | 'security_check';
 
 // ---------------------------------------------------------------------------
 // Sync Queue

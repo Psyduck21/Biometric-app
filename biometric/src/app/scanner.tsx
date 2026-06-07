@@ -62,6 +62,7 @@ export default function ScannerScreen() {
       else if (reason === 'offline_locked') msg = 'Offline window exceeded or time tampered. Please reconnect to internet.';
       else if (reason === 'security_violation') msg = 'Security check failed. Device may be rooted or emulator.';
       else if (reason === 'device_mismatch') msg = 'This device is no longer bound to your account.';
+      else if (reason === 'suspended') msg = 'Your account has been suspended by an administrator.';
       
       setMessage(msg);
       setStage('failed');
@@ -101,6 +102,20 @@ export default function ScannerScreen() {
           <Text style={s.permSub}>Register your face first to use biometric sign-in.</Text>
           <Pressable style={s.btnYellow} onPress={() => router.replace('/enrollment')}>
             <Text style={s.btnText}>Go to registration</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (resolvedUser.status === 'suspended') {
+    return (
+      <SafeAreaView style={s.root}>
+        <View style={s.permBox}>
+          <Text style={[s.permTitle, { color: T.error }]}>Account Suspended</Text>
+          <Text style={s.permSub}>Your account has been temporarily suspended by an administrator. Please contact IT support.</Text>
+          <Pressable style={[s.btnYellow, { marginTop: 20 }]} onPress={() => router.back()}>
+            <Text style={s.btnText}>Go Back</Text>
           </Pressable>
         </View>
       </SafeAreaView>
