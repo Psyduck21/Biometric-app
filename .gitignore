@@ -39,6 +39,12 @@ yarn-error.*
 app-example
 
 # generated native folders
-/ios
-/android
+/biometric/ios
+/biometric/android
 system-design/
+/biometric/supabase
+
+/biometric/release
+/biometric/.vscode
+/biometric/.claude
+/biometric/.env
