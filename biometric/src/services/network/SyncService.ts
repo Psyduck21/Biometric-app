@@ -115,6 +115,7 @@ export class SyncService {
         if (!this.isOnline) return;
 
         try {
+            await this.syncUserStatus();
             const pendingItems = await SyncQueueRepository.getPending(SyncService.BATCH_SIZE, Date.now());
             if (pendingItems.length === 0) {
                 const { ConfigRepository } = require('../../database/repositories/ConfigRepository');
@@ -130,7 +131,6 @@ export class SyncService {
                         await ConfigRepository.setNumber('last_successful_sync', Date.now());
                     }
                 }
-                await this.syncUserStatus();
                 return;
             }
 
@@ -291,9 +291,14 @@ export class SyncService {
             
             const binding = await deviceBindingService.getBindingForCurrentDevice();
             if (binding && binding.user_id) {
-                const response = await apiService.get<{ status: string }[]>(`/users?id=eq.${binding.user_id}&select=status`);
-                if (response.success && response.data && response.data.length > 0) {
-                    const cloudStatus = response.data[0].status;
+                // Call our new RPC to safely get status and template count (bypassing RLS)
+                const response = await apiService.post<{ status: string; active_templates: number }>('/rpc/get_mobile_sync_status', { p_user_id: binding.user_id });
+                
+                if (response.success && response.data) {
+                    const cloudStatus = response.data.status;
+                    const activeCloudTemplates = response.data.active_templates;
+                    
+                    // 1. Sync User Status
                     const localUser = await UserRepository.getUserById(binding.user_id);
                     if (localUser && localUser.status !== cloudStatus) {
                         console.log(`[SyncService] Cloud status changed from ${localUser.status} to ${cloudStatus}. Updating local database.`);
@@ -304,13 +309,10 @@ export class SyncService {
                         const { updateUserStatus } = require('../../store/slices/authSlices');
                         store.dispatch(updateUserStatus(cloudStatus as any));
                     }
-                }
 
-                // 2. Check for Hard Reset (0 active templates in cloud)
-                const { FaceTemplateRepository } = require('../../database/repositories/FaceTemplateRepository');
-                const tResponse = await apiService.get<any[]>(`/face_templates?user_id=eq.${binding.user_id}&is_active=eq.true`);
-                if (tResponse.success && tResponse.data) {
-                    if (tResponse.data.length === 0) {
+                    // 2. Check for Hard Reset (0 active templates in cloud)
+                    if (activeCloudTemplates === 0) {
+                        const { FaceTemplateRepository } = require('../../database/repositories/FaceTemplateRepository');
                         const activeLocal = await FaceTemplateRepository.getActive(binding.user_id);
                         if (activeLocal.length > 0) {
                             console.log(`[SyncService] Hard Reset detected from cloud! Deactivating local templates and logging out.`);
