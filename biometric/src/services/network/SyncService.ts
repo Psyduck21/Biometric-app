@@ -290,13 +290,31 @@ export class SyncService {
             const { UserRepository } = require('../../database/repositories/UserRepository');
             
             const binding = await deviceBindingService.getBindingForCurrentDevice();
+            const currentDeviceId = await deviceBindingService.getDeviceId();
+            
             if (binding && binding.user_id) {
                 // Call our new RPC to safely get status and template count (bypassing RLS)
-                const response = await apiService.post<{ status: string; active_templates: number }>('/rpc/get_mobile_sync_status', { p_user_id: binding.user_id });
+                const response = await apiService.post<{ status: string; active_templates: number; binding_active: boolean }>('/rpc/get_mobile_sync_status', { 
+                    p_user_id: binding.user_id,
+                    p_device_id: currentDeviceId 
+                });
                 
                 if (response.success && response.data) {
                     const cloudStatus = response.data.status;
                     const activeCloudTemplates = response.data.active_templates;
+                    const isBindingActive = response.data.binding_active;
+                    
+                    // 0. Check for Revoked Device Binding
+                    if (isBindingActive === false) {
+                        console.log(`[SyncService] Device binding revoked from cloud! Wiping local binding and logging out.`);
+                        const { deviceBindingService } = require('../DeviceBindingService');
+                        await deviceBindingService.clearBinding();
+                        
+                        const { store } = require('../../store');
+                        const { logout } = require('../../store/slices/authSlices');
+                        store.dispatch(logout());
+                        return; // Stop processing further checks
+                    }
                     
                     // 1. Sync User Status
                     const localUser = await UserRepository.getUserById(binding.user_id);
