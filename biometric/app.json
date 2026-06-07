@@ -24,6 +24,7 @@
       },
       "package": "com.akshatprj.biometric",
       "permissions": [
+        "CAMERA",
         "CAMERA"
       ]
     },
@@ -72,6 +73,12 @@
         "projectId": "ac8275ab-ce48-4bc4-9da2-ef2ef1cb9815"
       }
     },
-    "owner": "akshatprj"
+    "owner": "akshatprj",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ac8275ab-ce48-4bc4-9da2-ef2ef1cb9815"
+    }
   }
 }

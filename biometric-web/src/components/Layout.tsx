@@ -1,0 +1,85 @@
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { LayoutDashboard, Users, Shield, Settings, Bell, LogOut } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
+
+const Layout = () => {
+  const { user, signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/login');
+  };
+
+  return (
+    <div className="app-container">
+      {/* Sidebar */}
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <div style={{ position: 'relative', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <img src="/simple_face.png" style={{ width: '100%', height: '100%', objectFit: 'contain', zIndex: 1 }} alt="Aegis" />
+            <div style={{ position: 'absolute', top: 0, left: 0, width: '8px', height: '8px', borderTop: '2px solid var(--color-yellow)', borderLeft: '2px solid var(--color-yellow)', borderTopLeftRadius: '3px' }} />
+            <div style={{ position: 'absolute', top: 0, right: 0, width: '8px', height: '8px', borderTop: '2px solid var(--color-yellow)', borderRight: '2px solid var(--color-yellow)', borderTopRightRadius: '3px' }} />
+            <div style={{ position: 'absolute', bottom: 0, left: 0, width: '8px', height: '8px', borderBottom: '2px solid var(--color-yellow)', borderLeft: '2px solid var(--color-yellow)', borderBottomLeftRadius: '3px' }} />
+            <div style={{ position: 'absolute', bottom: 0, right: 0, width: '8px', height: '8px', borderBottom: '2px solid var(--color-yellow)', borderRight: '2px solid var(--color-yellow)', borderBottomRightRadius: '3px' }} />
+          </div>
+          Aegis Admin
+        </div>
+
+        <nav style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+          <NavLink to="/" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} end>
+            <LayoutDashboard size={20} />
+            Live Feed
+          </NavLink>
+          <NavLink to="/users" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Users size={20} />
+            Users & Identity
+          </NavLink>
+          <NavLink to="/security" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Shield size={20} />
+            Security & Hardware
+          </NavLink>
+          <NavLink to="/settings" className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}>
+            <Settings size={20} />
+            System Config
+          </NavLink>
+        </nav>
+
+        <div style={{ marginTop: 'auto', borderTop: '1px solid var(--color-hairline)', paddingTop: '16px' }}>
+          <button onClick={handleSignOut} className="nav-link" style={{ width: '100%', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left' }}>
+            <LogOut size={20} />
+            Sign Out
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content Area */}
+      <main className="main-content">
+        <header className="topbar">
+          <h2 style={{ fontSize: '1.25rem', margin: 0 }}>Operations Center</h2>
+          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+            <button style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--color-muted)', position: 'relative' }}>
+              <Bell size={20} />
+              <span style={{ position: 'absolute', top: '-2px', right: '-2px', width: '8px', height: '8px', background: 'var(--color-error)', borderRadius: '50%' }}></span>
+            </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--color-primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.875rem', fontWeight: 600 }}>
+                {user?.email?.charAt(0).toUpperCase() || 'A'}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--color-charcoal)' }}>{user?.email || 'Admin User'}</span>
+                <span style={{ fontSize: '0.75rem', color: 'var(--color-muted)' }}>Superadmin</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <div className="page-content fade-in">
+          <Outlet />
+        </div>
+      </main>
+    </div>
+  );
+};
+
+export default Layout;
