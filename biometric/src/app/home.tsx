@@ -326,6 +326,13 @@ export default function DashboardScreen() {
 
       <View style={s.divider} />
 
+      {currentUser?.status === 'suspended' ? (
+        <View style={s.suspendedBox}>
+          <Text style={s.suspendedIcon}>⚠️</Text>
+          <Text style={s.suspendedTitle}>Account Suspended</Text>
+          <Text style={s.suspendedSub}>Your account has been temporarily suspended by an administrator. You cannot record attendance at this time.</Text>
+        </View>
+      ) : (
       <Animated.View style={[{ flex: 1 }, { opacity: fadeIn }]}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
@@ -454,6 +461,7 @@ export default function DashboardScreen() {
 
         </ScrollView>
       </Animated.View>
+      )}
 
       {/* ── Profile drawer ── */}
       <ProfileDrawer
@@ -547,4 +555,10 @@ const s = StyleSheet.create({
   tabBtnActive:  { backgroundColor: T.white, shadowColor: T.black, shadowOpacity: 0.05, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
   tabText:       { fontSize: T.fs13, fontWeight: '600', color: T.muted, fontFamily: T.font },
   tabTextActive: { color: T.black },
+
+  // Suspended
+  suspendedBox:  { flex: 1, alignItems: 'center', justifyContent: 'center', padding: T.sp32, backgroundColor: T.error + '10' },
+  suspendedIcon: { fontSize: 48, marginBottom: T.sp16 },
+  suspendedTitle:{ fontSize: T.fs24, fontWeight: '700', color: T.error, fontFamily: T.font, marginBottom: T.sp8, textAlign: 'center' },
+  suspendedSub:  { fontSize: T.fs14, color: T.charcoal, fontFamily: T.font, textAlign: 'center', lineHeight: 20 },
 });

@@ -298,6 +298,29 @@ export class SyncService {
                     if (localUser && localUser.status !== cloudStatus) {
                         console.log(`[SyncService] Cloud status changed from ${localUser.status} to ${cloudStatus}. Updating local database.`);
                         await UserRepository.updateStatus(binding.user_id, cloudStatus as any);
+                        
+                        // Instantly update Redux so the UI reacts without restarting
+                        const { store } = require('../../store');
+                        const { updateUserStatus } = require('../../store/slices/authSlices');
+                        store.dispatch(updateUserStatus(cloudStatus as any));
+                    }
+                }
+
+                // 2. Check for Hard Reset (0 active templates in cloud)
+                const { FaceTemplateRepository } = require('../../database/repositories/FaceTemplateRepository');
+                const tResponse = await apiService.get<any[]>(`/face_templates?user_id=eq.${binding.user_id}&is_active=eq.true`);
+                if (tResponse.success && tResponse.data) {
+                    if (tResponse.data.length === 0) {
+                        const activeLocal = await FaceTemplateRepository.getActive(binding.user_id);
+                        if (activeLocal.length > 0) {
+                            console.log(`[SyncService] Hard Reset detected from cloud! Deactivating local templates and logging out.`);
+                            await FaceTemplateRepository.deactivateAll(binding.user_id);
+                            
+                            // Force app to re-evaluate state (pushes to enrollment)
+                            const { store } = require('../../store');
+                            const { logout } = require('../../store/slices/authSlices');
+                            store.dispatch(logout());
+                        }
                     }
                 }
             }

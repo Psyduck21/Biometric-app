@@ -40,8 +40,13 @@ const authSlice = createSlice({
       state.activeSessionId = null;
       state.sessionSource = 'unknown';
     },
+    updateUserStatus: (state, action: PayloadAction<'active' | 'suspended' | 'deleted'>) => {
+      if (state.currentUser) {
+        state.currentUser.status = action.payload;
+      }
+    },
   },
 });
 
-export const { setProfile, login, logout } = authSlice.actions;
+export const { setProfile, login, logout, updateUserStatus } = authSlice.actions;
 export default authSlice.reducer;
