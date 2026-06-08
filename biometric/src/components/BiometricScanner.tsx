@@ -58,6 +58,8 @@ export interface BiometricScannerProps {
   error?: string | null;
   /** Triggered when liveness challenges are successfully completed */
   onLivenessPassed: () => void;
+  /** Triggered when a liveness challenge fails */
+  onLivenessFailed?: (reason: string) => void;
   /** Triggered each time a valid face frame is processed */
   onCapture: (embedding: Float32Array, confidence: number) => Promise<void>;
 }
@@ -70,6 +72,7 @@ export function BiometricScannerCore({
   stage,
   error,
   onLivenessPassed,
+  onLivenessFailed,
   onCapture,
   antiUri,
   faceNetUri,
@@ -145,11 +148,15 @@ export function BiometricScannerCore({
         const instr = livenessService.getInstructionForChallenge(active);
         setLivenessInstruction(prev => prev !== instr ? instr : prev);
       } else if (result.failureReason) {
-        setLocalError('Liveness check timed out. Retrying...');
-        livenessService.startSession();
+        if (mode !== 'enrollment' && onLivenessFailed) {
+          onLivenessFailed(result.failureReason);
+        } else {
+          setLocalError('Liveness check failed. Retrying...');
+          livenessService.startSession();
+        }
       }
     }
-  }, [stage, onLivenessPassed]);
+  }, [stage, mode, onLivenessPassed, onLivenessFailed]);
 
   const safeLog = useCallback((msg: string) => { console.log(msg); }, []);
 

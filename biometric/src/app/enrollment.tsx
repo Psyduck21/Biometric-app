@@ -108,6 +108,20 @@ export default function EnrollmentScreen() {
       setError('Please fill in all fields.');
       return;
     }
+    if (fullName.trim().length < 2) {
+      setError('Name must be at least 2 characters.');
+      return;
+    }
+    const empIdRegex = /^EMP\d{3,4}$/;
+    if (!empIdRegex.test(employeeId.trim())) {
+      setError('Employee ID must be EMP followed by 3 or 4 digits.');
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email.trim())) {
+      setError('Please enter a valid email address.');
+      return;
+    }
     setBusy(true); setError(null);
     try {
       const user = await appSessionService.registerUser({ fullName, employeeId, email });
@@ -120,7 +134,12 @@ export default function EnrollmentScreen() {
       setCaptured(session.capturedSamples);
       setStage('liveness');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create profile.');
+      const msg = e instanceof Error ? e.message : 'Failed to create profile.';
+      if (msg === 'storage_error') {
+        setError('A secure storage error occurred. Please clear the app storage from your device settings and try again.');
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -140,8 +159,13 @@ export default function EnrollmentScreen() {
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Capture failed.';
-      setError(`${msg} Retrying...`);
-      setCaptured(0);
+      if (msg === 'storage_error') {
+        setError('A secure storage error occurred. Please clear the app storage from your device settings and try again.');
+        setCaptured(0);
+      } else {
+        setError(`${msg} Retrying...`);
+        setCaptured(0);
+      }
       
       if (profileId) {
         enrollmentService.startEnrollment(profileId)

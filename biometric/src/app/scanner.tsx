@@ -57,12 +57,16 @@ export default function ScannerScreen() {
     } else {
       const reason = resultData.failureReason ?? 'no_match';
       let msg = 'Authentication failed.';
-      if (reason === 'locked') msg = 'Too many attempts. Try again later.';
+      if (reason === 'locked') {
+        const mins = resultData.remainingMins || 60;
+        msg = `Too many attempts. Device locked for ${mins} minutes.`;
+      }
       else if (reason === 'spoofed') msg = 'Spoofing detected.';
       else if (reason === 'offline_locked') msg = 'Offline window exceeded or time tampered. Please reconnect to internet.';
       else if (reason === 'security_violation') msg = 'Security check failed. Device may be rooted or emulator.';
       else if (reason === 'device_mismatch') msg = 'This device is no longer bound to your account.';
       else if (reason === 'suspended') msg = 'Your account has been suspended by an administrator.';
+      else if (reason === 'storage_error') msg = 'A secure storage error occurred. Please clear the app storage from your device settings and try again.';
       
       setMessage(msg);
       setStage('failed');
@@ -78,7 +82,37 @@ export default function ScannerScreen() {
     }
   }, [onAuthenticationComplete]);
 
-  const startFlow = () => {
+  const handleLivenessFailed = useCallback(async (reason: string) => {
+    const { deviceBindingService } = require('../services/DeviceBindingService');
+    const { sessionService } = require('../services/SessionService');
+    
+    const deviceId = await deviceBindingService.getDeviceId();
+    const lockoutStatus = await sessionService.recordFailure(deviceId);
+    
+    if (lockoutStatus.isLocked) {
+      const remainingMins = Math.ceil((lockoutStatus.retryInMs || 0) / 60000);
+      onAuthenticationComplete(false, { failureReason: 'locked', remainingMins });
+    } else {
+      setMessage(`Liveness check failed (${reason}). ${lockoutStatus.attemptsRemaining} attempts remaining. Retrying...`);
+      // Restart liveness automatically without forcing the user to tap "Start Scan" again
+      const { livenessService } = require('../services/ai/LivenessService');
+      livenessService.startSession();
+    }
+  }, [onAuthenticationComplete]);
+
+  const startFlow = async () => {
+    const { deviceBindingService } = require('../services/DeviceBindingService');
+    const { sessionService } = require('../services/SessionService');
+    const deviceId = await deviceBindingService.getDeviceId();
+    const lockout = await sessionService.checkLockout(deviceId);
+    
+    if (lockout.isLocked) {
+      const mins = Math.ceil((lockout.retryInMs || 0) / 60000);
+      setMessage(`Too many attempts. Device locked for ${mins} minutes.`);
+      setStage('failed');
+      return;
+    }
+
     setStage('liveness');
     setMessage(null);
   };
@@ -141,6 +175,7 @@ export default function ScannerScreen() {
           requiredCaptures={1}
           error={message}
           onLivenessPassed={() => setStage('capture')}
+          onLivenessFailed={handleLivenessFailed}
           onCapture={authenticateFace}
         />
       )}

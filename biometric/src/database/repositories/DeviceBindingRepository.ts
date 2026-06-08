@@ -23,7 +23,7 @@ export class DeviceBindingRepository {
     static async insert(binding: DeviceBinding, tx?: Transaction): Promise<void> {
         const runner = tx || dbClient.getDb();
         const sql = `
-            INSERT INTO device_bindings (
+            INSERT OR REPLACE INTO device_bindings (
                 id, user_id, device_id, device_model, os_version, app_version,
                 public_key, attestation_token, attestation_valid, bound_at,
                 last_verified_at, is_active, revoked_at, revoke_reason

@@ -65,7 +65,7 @@ export class LivenessService {
      * Number of challenges a subject must complete to pass liveness.
      * Set to 2 so a single lucky blink cannot trivially unlock the system.
      */
-    private readonly REQUIRED_CHALLENGES = 2;
+    private readonly REQUIRED_CHALLENGES = 4;
 
     /**
      * Maximum time in milliseconds allowed to complete a single challenge.
@@ -91,6 +91,12 @@ export class LivenessService {
      * Test Case A10: yaw > 15° left then right.
      */
     private readonly YAW_TURN_THRESHOLD = 15;
+
+    /**
+     * Pitch threshold in degrees required to satisfy an UP/DOWN HEAD_TURN challenge.
+     * Based on face orientation, pitch indicates looking up or down.
+     */
+    private readonly PITCH_TURN_THRESHOLD = 12;
 
     /**
      * Smile probability threshold.
@@ -158,7 +164,10 @@ export class LivenessService {
         switch (challenge.type) {
             case 'BLINK': return 'Please blink your eyes';
             case 'SMILE': return 'Please smile widely';
-            case 'HEAD_TURN': return 'Turn your head slightly left or right';
+            case 'HEAD_LEFT': return 'Turn your head left';
+            case 'HEAD_RIGHT': return 'Turn your head right';
+            case 'HEAD_UP': return 'Look up slightly';
+            case 'HEAD_DOWN': return 'Look down slightly';
             default: return 'Please look at the camera';
         }
     }
@@ -231,11 +240,20 @@ export class LivenessService {
             case 'BLINK':
                 passed = this.evaluateBlink(metrics.ear); // 'ear' in LivenessMetrics is repurposed for eye open probability average
                 break;
-            case 'HEAD_TURN':
-                passed = this.evaluateHeadTurn(metrics.yaw, activeChallenge.direction);
-                break;
             case 'SMILE':
                 passed = this.evaluateSmile(metrics.smileRatio);
+                break;
+            case 'HEAD_LEFT':
+                passed = this.evaluateHeadTurn(metrics.yaw, metrics.pitch, 'LEFT');
+                break;
+            case 'HEAD_RIGHT':
+                passed = this.evaluateHeadTurn(metrics.yaw, metrics.pitch, 'RIGHT');
+                break;
+            case 'HEAD_UP':
+                passed = this.evaluateHeadTurn(metrics.yaw, metrics.pitch, 'UP');
+                break;
+            case 'HEAD_DOWN':
+                passed = this.evaluateHeadTurn(metrics.yaw, metrics.pitch, 'DOWN');
                 break;
         }
 
@@ -297,10 +315,23 @@ export class LivenessService {
      * @param direction - Required turn direction ('LEFT' or 'RIGHT')
      * @returns True if yaw exceeds the threshold in the required direction
      */
-    private evaluateHeadTurn(yaw: number, direction?: 'LEFT' | 'RIGHT'): boolean {
-        // Front cameras often mirror yaw inconsistently across Android devices.
-        // To be foolproof, we accept a turn in either direction.
-        return Math.abs(yaw) > this.YAW_TURN_THRESHOLD;
+    private evaluateHeadTurn(yaw: number, pitch: number, direction?: 'LEFT' | 'RIGHT' | 'UP' | 'DOWN'): boolean {
+        switch (direction) {
+            case 'UP':
+                // Positive pitch indicates looking up
+                return pitch > this.PITCH_TURN_THRESHOLD;
+            case 'DOWN':
+                // Negative pitch indicates looking down
+                return pitch < -this.PITCH_TURN_THRESHOLD;
+            case 'LEFT':
+                // Negative yaw typically indicates looking to the subject's left
+                return yaw < -this.YAW_TURN_THRESHOLD;
+            case 'RIGHT':
+                // Positive yaw typically indicates looking to the subject's right
+                return yaw > this.YAW_TURN_THRESHOLD;
+            default:
+                return false;
+        }
     }
 
     /**
@@ -320,7 +351,7 @@ export class LivenessService {
      * @returns Array of LivenessChallenge objects, each in PENDING state
      */
     private generateChallengeSequence(count: number): LivenessChallenge[] {
-        const allTypes: ChallengeType[] = ['BLINK', 'HEAD_TURN', 'SMILE'];
+        const allTypes: ChallengeType[] = ['BLINK', 'SMILE', 'HEAD_LEFT', 'HEAD_RIGHT', 'HEAD_UP', 'HEAD_DOWN'];
         const sequence: LivenessChallenge[] = [];
         let lastType: ChallengeType | null = null;
 
@@ -330,17 +361,10 @@ export class LivenessService {
             const chosen = available[Math.floor(Math.random() * available.length)];
             lastType = chosen;
 
-            // For HEAD_TURN, randomly assign a direction
-            const direction: 'LEFT' | 'RIGHT' | undefined =
-                chosen === 'HEAD_TURN'
-                    ? (Math.random() > 0.5 ? 'LEFT' : 'RIGHT')
-                    : undefined;
-
             sequence.push({
                 type: chosen,
                 issuedAt: Date.now(),
                 outcome: 'PENDING',
-                direction,
             });
         }
 

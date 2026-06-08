@@ -11,7 +11,7 @@
  * HEAD_TURN  - The subject must turn their head left or right past a yaw threshold.
  * SMILE      - The subject must produce a visible smile past a lip-ratio threshold.
  */
-export type ChallengeType = 'BLINK' | 'HEAD_TURN' | 'SMILE' | 'LEFT' | 'RIGHT';
+export type ChallengeType = 'BLINK' | 'SMILE' | 'HEAD_LEFT' | 'HEAD_RIGHT' | 'HEAD_UP' | 'HEAD_DOWN';
 
 /**
  * Possible outcomes of a single challenge attempt.
@@ -34,7 +34,6 @@ export interface LivenessChallenge {
     type: ChallengeType;
     issuedAt: number;
     outcome: ChallengeOutcome;
-    direction?: 'LEFT' | 'RIGHT';
 }
 
 /**

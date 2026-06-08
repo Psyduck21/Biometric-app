@@ -147,7 +147,7 @@ export class SessionService {
      * @returns LockoutStatus describing whether the device is locked.
      */
     async checkLockout(deviceId: string): Promise<LockoutStatus> {
-        const maxAttempts = await ConfigRepository.getNumber('max_auth_attempts', 3);
+        const maxAttempts = await ConfigRepository.getNumber('max_auth_attempts', 2);
         const now = Date.now();
 
         const entry = this.failureMap.get(deviceId);
@@ -186,8 +186,8 @@ export class SessionService {
      * @returns The updated LockoutStatus after recording this failure.
      */
     async recordFailure(deviceId: string): Promise<LockoutStatus> {
-        const maxAttempts = await ConfigRepository.getNumber('max_auth_attempts', 3);
-        const lockoutMin = await ConfigRepository.getNumber('lockout_duration_min', 15);
+        const maxAttempts = await ConfigRepository.getNumber('max_auth_attempts', 2);
+        const lockoutMin = await ConfigRepository.getNumber('lockout_duration_min', 60);
         const lockoutMs = lockoutMin * 60_000;
 
         const existing = this.failureMap.get(deviceId) ?? { count: 0, lockedUntil: 0 };

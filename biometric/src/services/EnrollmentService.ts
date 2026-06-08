@@ -334,6 +334,42 @@ export class EnrollmentService {
                     this.sessions.delete(sessionId);
                     return { success: false, failureReason: 'identity_mismatch', consistencyScore };
                 }
+            } else {
+                // LOCAL STORAGE IS CLEARED OR FRESH INSTALL
+                // Verify against the cloud using our new RPC
+                const { apiService } = require('./network/ApiService');
+                console.log(`[Enrollment] No local templates found. Verifying re-enrollment against cloud...`);
+                
+                try {
+                    const response = await apiService.post('/rpc/authorize_re_enrollment', {
+                        p_user_id: session.userId,
+                        p_embedding: '[' + Array.from(masterEmbedding).join(',') + ']'
+                    });
+
+                    if (!response.success || (response.data && response.data.success === false)) {
+                        const errorMsg = response.data?.error || response.error || 'Identity mismatch detected by cloud.';
+                        console.error(`[Enrollment] IDENTITY MISMATCH! Cloud rejected re-enrollment: ${errorMsg}`);
+                        
+                        // Log the takeover attempt
+                        await auditService.log({
+                            user_id: session.userId,
+                            action: 'identity_takeover_attempt',
+                            entity_type: 'face_template',
+                            outcome: 'blocked',
+                            failure_reason: 'cloud_identity_mismatch',
+                            metadata: JSON.stringify({ error: errorMsg }),
+                        });
+
+                        this.sessions.delete(sessionId);
+                        return { success: false, failureReason: 'identity_mismatch', consistencyScore };
+                    }
+                    
+                    console.log(`[Enrollment] Cloud verification passed or fresh enrollment confirmed.`);
+                } catch (e) {
+                    console.error('[Enrollment] Failed to verify re-enrollment with cloud:', e);
+                    this.sessions.delete(sessionId);
+                    throw new Error('Network required to verify identity for re-enrollment.');
+                }
             }
             // -------------------------------------------------------------------
 

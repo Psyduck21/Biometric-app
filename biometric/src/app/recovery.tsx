@@ -94,6 +94,25 @@ export default function RecoveryScreen() {
     }
   }, [stage, recoveryToken]);
 
+  const handleLivenessFailed = useCallback(async (reason: string) => {
+    const { deviceBindingService } = require('../services/DeviceBindingService');
+    const { sessionService } = require('../services/SessionService');
+    
+    const deviceId = await deviceBindingService.getDeviceId();
+    const lockoutStatus = await sessionService.recordFailure(deviceId);
+    
+    if (lockoutStatus.isLocked) {
+      const mins = Math.ceil((lockoutStatus.retryInMs || 0) / 60000);
+      setError(`Too many failed attempts. Device is locked for ${mins} minutes.`);
+      setStage('request_otp');
+    } else {
+      setError(`Liveness check failed (${reason}). ${lockoutStatus.attemptsRemaining} attempts remaining. Retrying...`);
+      // Restart liveness automatically
+      const { livenessService } = require('../services/ai/LivenessService');
+      livenessService.startSession();
+    }
+  }, []);
+
   return (
     <SafeAreaView style={s.root}>
       <StatusBar barStyle="dark-content" backgroundColor={T.white} />
@@ -181,6 +200,7 @@ export default function RecoveryScreen() {
           requiredCaptures={required}
           error={error}
           onLivenessPassed={() => setStage('capture')}
+          onLivenessFailed={handleLivenessFailed}
           onCapture={onValidFrame}
         />
       )}

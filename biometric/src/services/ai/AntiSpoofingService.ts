@@ -1,6 +1,6 @@
 import { AntiSpoofingResult } from '../../types/liveness';
 
-const REAL_FACE_THRESHOLD = 0.3;
+const REAL_FACE_THRESHOLD = 0.85;
 
 export function classifyAttackType(confidence: number): AntiSpoofingResult['attackType'] {
   'worklet';
