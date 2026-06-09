@@ -254,6 +254,7 @@ export interface GPSCoordinates {
     altitude?: number;
     accuracy: number; // meters
     timestamp: number;
+    isMocked?: boolean;
 }
 
 export type AttendanceEventType = 'check_in' | 'check_out' | 'break_start' | 'break_end';
@@ -271,6 +272,7 @@ export interface AttendanceRecord {
     accuracy_meters?: number;
     geofence_id?: string;
     geofence_valid: 0 | 1;
+    is_location_mocked: 0 | 1;
     similarity_score: number;
     session_id: string;
     device_id: string;

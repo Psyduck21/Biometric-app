@@ -34,6 +34,18 @@ export class AttendanceService {
         let geofenceId: string | undefined = undefined;
 
         if (location) {
+            if (location.isMocked) {
+                console.warn('[AttendanceService] BLOCKED: Mock location detected.');
+                await auditService.log({
+                    user_id: session.user_id,
+                    action: 'security_fail',
+                    entity_type: 'attendance',
+                    outcome: 'blocked',
+                    metadata: JSON.stringify({ reason: 'mock_location_detected' })
+                });
+                throw new Error('Spoofed location detected. Please disable Fake GPS and try again.');
+            }
+
             const validation = await locationService.validateGeofence(location);
             isGeofenceValid = validation.valid ? 1 : 0;
             geofenceId = validation.geofenceId;
@@ -49,6 +61,7 @@ export class AttendanceService {
             accuracy_meters: location?.accuracy,
             geofence_id: geofenceId,
             geofence_valid: isGeofenceValid,
+            is_location_mocked: 0, // Since we block if true, it will always be 0 here
             similarity_score: session.similarity_score,
             session_id: session.id,
             device_id: deviceId,

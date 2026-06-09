@@ -37,6 +37,7 @@ export const INITIAL_SCHEMA = `
     accuracy_meters REAL,
     geofence_id TEXT,
     geofence_valid INTEGER NOT NULL DEFAULT 0,
+    is_location_mocked INTEGER NOT NULL DEFAULT 0,
     similarity_score REAL NOT NULL,
     session_id TEXT NOT NULL,
     device_id TEXT NOT NULL,

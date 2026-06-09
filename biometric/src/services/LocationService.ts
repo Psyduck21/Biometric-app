@@ -42,6 +42,7 @@ export class LocationService {
                 altitude: location.coords.altitude ?? undefined,
                 accuracy: location.coords.accuracy ?? 0,
                 timestamp: location.timestamp,
+                isMocked: location.mocked ?? false,
             };
         } catch (error) {
             console.warn('[LocationService] Failed to get current position, trying last known.', error);
@@ -62,6 +63,7 @@ export class LocationService {
                     altitude: location.coords.altitude ?? undefined,
                     accuracy: location.coords.accuracy ?? 0,
                     timestamp: location.timestamp,
+                    isMocked: location.mocked ?? false,
                 };
             }
         } catch (error) {
