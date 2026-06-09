@@ -142,7 +142,8 @@ export type AuditAction =
     | 'admin_suspend'
     | 'admin_config_update'
     | 'identity_takeover_attempt'
-    | 'security_check';
+    | 'security_check'
+    | 'security_fail';
 
 // ---------------------------------------------------------------------------
 // Sync Queue
