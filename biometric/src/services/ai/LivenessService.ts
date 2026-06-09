@@ -324,11 +324,11 @@ export class LivenessService {
                 // Negative pitch indicates looking down
                 return pitch < -this.PITCH_TURN_THRESHOLD;
             case 'LEFT':
-                // Negative yaw typically indicates looking to the subject's left
-                return yaw < -this.YAW_TURN_THRESHOLD;
-            case 'RIGHT':
-                // Positive yaw typically indicates looking to the subject's right
+                // Positive yaw indicates looking to the subject's left (due to camera mirroring)
                 return yaw > this.YAW_TURN_THRESHOLD;
+            case 'RIGHT':
+                // Negative yaw indicates looking to the subject's right (due to camera mirroring)
+                return yaw < -this.YAW_TURN_THRESHOLD;
             default:
                 return false;
         }
