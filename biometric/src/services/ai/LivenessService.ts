@@ -125,6 +125,13 @@ export class LivenessService {
     private readonly PASSIVE_HISTORY_SIZE = 15;
 
     /**
+     * Terminal failure reason that persists across all subsequent buildResult() calls.
+     * Set when a session ends in a non-recoverable state (e.g. static spoof detected).
+     * Cleared on every startSession() call.
+     */
+    private terminalFailureReason: string | undefined = undefined;
+
+    /**
      * Begins a new liveness challenge session.
      * Resets all state and randomly selects the required challenges.
      *
@@ -140,6 +147,7 @@ export class LivenessService {
         this.challenges = this.generateChallengeSequence(this.REQUIRED_CHALLENGES);
         this.pitchHistory = [];
         this.yawHistory = [];
+        this.terminalFailureReason = undefined;
 
         // console.log(
         //     '[LivenessService] Session started. Challenges:',
@@ -208,10 +216,9 @@ export class LivenessService {
             // Humans naturally micro-jitter. Variance < 0.02 is impossibly still
             if (pitchVariance < 0.02 && yawVariance < 0.02) {
                 console.warn(`[LivenessService] SPOOF DETECTED: Unnatural stillness (PitchVar: ${pitchVariance.toFixed(4)}, YawVar: ${yawVariance.toFixed(4)})`);
+                this.terminalFailureReason = 'STATIC_SPOOF_DETECTED';
                 this.sessionActive = false;
-                const result = this.buildResult();
-                result.failureReason = 'STATIC_SPOOF_DETECTED';
-                return result;
+                return this.buildResult();
             }
         }
 
@@ -386,7 +393,7 @@ export class LivenessService {
             completedCount,
             requiredCount: this.REQUIRED_CHALLENGES,
             challenges: [...this.challenges],
-            failureReason: hasFailed ? 'challenge_timeout_or_failure' : undefined,
+            failureReason: this.terminalFailureReason ?? (hasFailed ? 'challenge_timeout_or_failure' : undefined),
         };
     }
 

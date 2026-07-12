@@ -99,12 +99,31 @@ export class SecurityCheckService {
     }
 
     /**
-     * Detects if a JavaScript debugger is connected to the app.
+     * Detects if a JavaScript or native debugger is connected to the app.
      *
-     * In a production APK, __DEV__ is always false.
+     * Three layers of detection:
+     *   1. Build-time flag — __DEV__ is always false in production APKs/IPAs.
+     *   2. Hermes remote debugger — nativeCallSyncHook is absent when the JS
+     *      bundle runs under a remote debugger (Chrome DevTools / Flipper).
+     *   3. Timing attack — debuggers introduce measurable step-over delays.
+     *      A tight loop of 100k iterations should complete in < 50ms on device.
      */
     isDebuggerAttached(): boolean {
-        return typeof __DEV__ !== 'undefined' && __DEV__ === true;
+        // Layer 1: compile-time constant
+        if (typeof __DEV__ !== 'undefined' && __DEV__ === true) return true;
+
+        // Layer 2: Hermes remote debugger detection
+        // nativeCallSyncHook is set by the RN bridge; absent under remote JS debuggers
+        if (typeof (global as any).nativeCallSyncHook === 'undefined') return true;
+
+        // Layer 3: Timing heuristic — debuggers slow down tight loops measurably
+        const t0 = Date.now();
+        let acc = 0;
+        for (let i = 0; i < 100_000; i++) acc += i;
+        void acc; // prevent dead-code elimination
+        if (Date.now() - t0 > 50) return true;
+
+        return false;
     }
 
     getPlatform(): string {

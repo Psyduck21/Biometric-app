@@ -20,7 +20,7 @@ import { User } from '../types/domain';
 
 import BiometricScanner from '../components/BiometricScanner';
 
-type LivenessStage = 'info' | 'liveness' | 'capture' | 'success' | 'failed';
+type LivenessStage = 'info' | 'capture' | 'liveness' | 'success' | 'failed';
 
 export default function ScannerScreen() {
   const dispatch = useAppDispatch();
@@ -48,6 +48,12 @@ export default function ScannerScreen() {
 
   const [stage, setStage] = useState<LivenessStage>('info');
   const [message, setMessage] = useState<string | null>(null);
+  /**
+   * Holds the embedding captured in the capture stage.
+   * Only passed to authenticate() after liveness is confirmed.
+   * Cleared on liveness failure or reset to prevent auth without liveness.
+   */
+  const [pendingAuth, setPendingAuth] = useState<{ embedding: Float32Array; confidence: number } | null>(null);
 
   const onAuthenticationComplete = useCallback((success: boolean, resultData: any) => {
     if (success && resultData.sessionId) {
@@ -73,19 +79,44 @@ export default function ScannerScreen() {
     }
   }, [currentUser, dispatch]);
 
+  /**
+   * Called by BiometricScanner onCapture during the capture stage.
+   * Stores the verified (anti-spoof passed) embedding and transitions to liveness.
+   * Authentication itself is deferred until all 4 liveness challenges are passed.
+   */
   const authenticateFace = useCallback(async (embedding: Float32Array, confidence: number) => {
+    setPendingAuth({ embedding, confidence });
+    setStage('liveness');
+  }, []);
+
+  /**
+   * Called after all 4 liveness challenges pass.
+   * Consumes pendingAuth and calls AuthenticationService.
+   */
+  const onScannerLivenessPassed = useCallback(async () => {
+    if (!pendingAuth) {
+      // Safety guard — should not happen, but fail safely
+      setMessage('No face data found. Please try again.');
+      setStage('failed');
+      return;
+    }
     try {
-      const result = await authenticationService.authenticate(embedding, confidence);
+      const result = await authenticationService.authenticate(pendingAuth.embedding, pendingAuth.confidence);
+      setPendingAuth(null);
       onAuthenticationComplete(result.success, result);
     } catch (e) {
+      setPendingAuth(null);
       onAuthenticationComplete(false, { failureReason: 'error' });
     }
-  }, [onAuthenticationComplete]);
+  }, [pendingAuth, onAuthenticationComplete]);
 
   const handleLivenessFailed = useCallback(async (reason: string) => {
     const { deviceBindingService } = require('../services/DeviceBindingService');
     const { sessionService } = require('../services/SessionService');
     
+    // Discard the pending embedding — auth cannot proceed without liveness
+    setPendingAuth(null);
+
     const deviceId = await deviceBindingService.getDeviceId();
     const lockoutStatus = await sessionService.recordFailure(deviceId);
     
@@ -94,9 +125,8 @@ export default function ScannerScreen() {
       onAuthenticationComplete(false, { failureReason: 'locked', remainingMins });
     } else {
       setMessage(`Liveness check failed (${reason}). ${lockoutStatus.attemptsRemaining} attempts remaining. Retrying...`);
-      // Restart liveness automatically without forcing the user to tap "Start Scan" again
-      const { livenessService } = require('../services/ai/LivenessService');
-      livenessService.startSession();
+      // Restart from capture stage so anti-spoof reruns on a fresh embedding
+      setStage('capture');
     }
   }, [onAuthenticationComplete]);
 
@@ -113,13 +143,14 @@ export default function ScannerScreen() {
       return;
     }
 
-    setStage('liveness');
+    setStage('capture');
     setMessage(null);
   };
 
   const reset = () => {
     setStage('info');
     setMessage(null);
+    setPendingAuth(null);
   };
 
 
@@ -167,14 +198,14 @@ export default function ScannerScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      {(stage === 'liveness' || stage === 'capture') && (
+      {(stage === 'capture' || stage === 'liveness') && (
         <BiometricScanner
           mode="authentication"
           stage={stage}
           captured={0}
           requiredCaptures={1}
           error={message}
-          onLivenessPassed={() => setStage('capture')}
+          onLivenessPassed={onScannerLivenessPassed}
           onLivenessFailed={handleLivenessFailed}
           onCapture={authenticateFace}
         />

@@ -112,11 +112,14 @@ export function BiometricScannerCore({
   const isCapturing = useRef(createSynchronizable(false)).current;
   const isProcessing = useRef(createSynchronizable(false)).current;
   const lastCaptureTime = useRef(createSynchronizable(0)).current;
+  /** Counts liveness frames so we can run anti-spoof every Nth frame without thermal overload */
+  const livenessFrameCount = useRef(createSynchronizable(0)).current;
 
   // Ensure liveness starts when stage changes to liveness
   useEffect(() => {
     if (stage === 'liveness') {
       livenessService.startSession();
+      livenessFrameCount.setBlocking(0);
       // Delay initial capture to avoid instant captures
       lastCaptureTime.setBlocking(Date.now() + 2000);
     } else if (stage === 'capture') {
@@ -157,6 +160,18 @@ export function BiometricScannerCore({
       }
     }
   }, [stage, mode, onLivenessPassed, onLivenessFailed]);
+
+  /** Called from the worklet when anti-spoofing fires during a liveness frame */
+  const handleLivenessSpoofDetected = useCallback((attackType: string) => {
+    console.warn(`[BiometricScanner] Spoof detected during liveness stage: ${attackType}`);
+    if (onLivenessFailed) {
+      onLivenessFailed('SPOOF_DURING_LIVENESS');
+    } else {
+      setLocalError('Spoofing detected. Please use your real face.');
+      livenessService.startSession();
+      livenessFrameCount.setBlocking(0);
+    }
+  }, [onLivenessFailed]);
 
   const safeLog = useCallback((msg: string) => { console.log(msg); }, []);
 
@@ -237,6 +252,32 @@ export function BiometricScannerCore({
         if (stage === 'liveness') {
           // Update capture timestamp for FPS throttling
           lastCaptureTime.setBlocking(Date.now());
+
+          // ── Anti-spoof gate on every 5th liveness frame ──────────────────
+          // Runs MiniFASNet at ~3 FPS during liveness to catch photo/replay spoofs
+          // that might otherwise satisfy the challenge-response gestures via video.
+          const frameIdx = livenessFrameCount.getBlocking() + 1;
+          livenessFrameCount.setBlocking(frameIdx);
+
+          if (frameIdx % 5 === 0) {
+            const baseFrame = baseResizer.resize(frame);
+            const baseRaw = new Float32Array(baseFrame.getPixelBuffer());
+            baseFrame.dispose();
+
+            const smArray = cropAndScaleTensor(baseRaw, 512, 512, mappedX, mappedY, mappedW, mappedH, 80, 80, '[0, 255]');
+            const spoofOutput = antispoofing.model!.runSync([smArray.buffer as ArrayBuffer]);
+            const rawSpoof = new Float32Array(spoofOutput[0]);
+            const spoofResult = processAntiSpoofingOutput(rawSpoof);
+
+            if (!spoofResult.isRealFace) {
+              runOnJS(handleLivenessSpoofDetected)(spoofResult.attackType ?? 'UNKNOWN');
+              isProcessing.setBlocking(false);
+              frame.dispose();
+              return;
+            }
+          }
+          // ─────────────────────────────────────────────────────────────────
+
           const metrics = extractLivenessMetrics(face, frame.width, frame.height);
           runOnJS(handleLivenessMetrics)(metrics);
         } else if (stage === 'capture') {

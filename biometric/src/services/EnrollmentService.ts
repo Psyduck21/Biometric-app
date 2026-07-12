@@ -186,7 +186,7 @@ export class EnrollmentService {
 
         // Step 1: Embedding consistency gate
         const consistencyScore = this._computeConsistencyScore(session.samples);
-        const minConsistency   = await ConfigRepository.getNumber('min_consistency_score', 0.55);
+        const minConsistency   = await ConfigRepository.getNumber('min_consistency_score', 0.75);
 
         console.log(`[Enrollment] Finalizing 5 captures...`);
         console.log(`[Enrollment] Enrollment consistency check:`);
@@ -258,7 +258,7 @@ export class EnrollmentService {
             const validSamples = session.samples.filter((sample, idx) => {
                 const sim = this._cosineSimilarity(centroid, sample.embedding);
                 // console.log(`[Enrollment] Sample ${idx + 1} centroid similarity: ${sim.toFixed(4)}`);
-                return sim > 0.65; // High threshold for outlier rejection
+                return sim > 0.70; // Raised to align with increased consistency threshold
             });
 
             console.log(`[Enrollment] Valid samples after outlier rejection: ${validSamples.length} / ${session.samples.length}`);
@@ -316,7 +316,7 @@ export class EnrollmentService {
                 }
 
                 console.log(`[Enrollment] Max similarity with previous templates: ${maxSim.toFixed(4)}`);
-                const RE_ENROLL_SIMILARITY_THRESHOLD = await ConfigRepository.getNumber('re_enroll_similarity_threshold', 0.65);
+                const RE_ENROLL_SIMILARITY_THRESHOLD = await ConfigRepository.getNumber('re_enroll_similarity_threshold', 0.80);
 
                 if (maxSim < RE_ENROLL_SIMILARITY_THRESHOLD && maxSim > 0) { // maxSim > 0 ensures we don't reject if all decryptions failed
                     console.error(`[Enrollment] IDENTITY MISMATCH! New face similarity (${maxSim.toFixed(4)}) is below threshold (${RE_ENROLL_SIMILARITY_THRESHOLD}).`);

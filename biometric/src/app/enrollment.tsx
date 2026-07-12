@@ -20,11 +20,11 @@ import { useAppDispatch } from '../store/hooks';
 import { setProfile } from '../store/slices/authSlices';
 import BiometricScanner from '../components/BiometricScanner';
 
-type Stage = 'checking_device' | 'info' | 'liveness' | 'capture' | 'success' | 'failed';
+type Stage = 'checking_device' | 'info' | 'capture' | 'liveness' | 'success' | 'failed';
 
 // ── Step indicator ─────────────────────────────────────────────────────────
 function StepRow({ current }: { current: number }) {
-  const labels = ['Profile', 'Liveness', 'Face scan'];
+  const labels = ['Profile', 'Face scan', 'Liveness'];
   return (
     <View style={s.stepRow}>
       {labels.map((label, i) => {
@@ -132,7 +132,7 @@ export default function EnrollmentScreen() {
       setSessionId(session.sessionId);
       setRequired(session.requiredSamples);
       setCaptured(session.capturedSamples);
-      setStage('liveness');
+      setStage('capture');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to create profile.';
       if (msg === 'storage_error') {
@@ -145,17 +145,17 @@ export default function EnrollmentScreen() {
     }
   };
 
-  // ── Step 2 Automatic Capture ───────────────────────────────────────────
+  // ── Step 2: Face capture (anti-spoof + embed) ─────────────────────────
+  // Accumulates samples but does NOT finalize — waits for liveness to pass first.
   const onValidFrame = useCallback(async (embedding: Float32Array, confidence: number) => {
     if (stage !== 'capture' || !sessionId) return;
     try {
       const updated = await enrollmentService.addSample(sessionId, "" as any, embedding, confidence);
       setCaptured(updated.capturedSamples);
 
+      // All samples captured — move to liveness stage (finalize happens after liveness)
       if (updated.capturedSamples >= updated.requiredSamples) {
-        const result = await enrollmentService.finalizeEnrollment(sessionId);
-        if (!result.success) throw new Error(result.failureReason ?? 'Enrollment failed.');
-        setStage('success');
+        setStage('liveness');
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Capture failed.';
@@ -175,7 +175,33 @@ export default function EnrollmentScreen() {
     }
   }, [stage, sessionId, profileId]);
 
-  const stageIndex = stage === 'info' ? 0 : stage === 'liveness' ? 1 : stage === 'capture' ? 2 : 3;
+  // ── Step 3: Liveness passed → finalize enrollment ──────────────────────
+  const onEnrollmentLivenessPassed = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const result = await enrollmentService.finalizeEnrollment(sessionId);
+      if (!result.success) throw new Error(result.failureReason ?? 'Enrollment failed.');
+      setStage('success');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Enrollment failed.';
+      setError(msg === 'storage_error'
+        ? 'A secure storage error occurred. Please clear the app storage from your device settings and try again.'
+        : msg
+      );
+      // Reset capture so the user restarts from face scan
+      setCaptured(0);
+      if (profileId) {
+        enrollmentService.startEnrollment(profileId)
+          .then(newSession => {
+            setSessionId(newSession.sessionId);
+            setStage('capture');
+          })
+          .catch(() => setError('Failed to restart session. Please go back.'));
+      }
+    }
+  }, [sessionId, profileId]);
+
+  const stageIndex = stage === 'info' ? 0 : stage === 'capture' ? 1 : stage === 'liveness' ? 2 : 3;
 
   return (
     <SafeAreaView style={s.root}>
@@ -293,15 +319,15 @@ export default function EnrollmentScreen() {
         </KeyboardAvoidingView>
       )}
 
-      {/* ── Stage: Liveness & Capture ──────────────────────────────────────────── */}
-      {(stage === 'liveness' || stage === 'capture') && (
+      {/* ── Stage: Capture & Liveness ──────────────────────────────────────────── */}
+      {(stage === 'capture' || stage === 'liveness') && (
         <BiometricScanner
           mode="enrollment"
           stage={stage}
           captured={captured}
           requiredCaptures={required}
           error={error}
-          onLivenessPassed={() => setStage('capture')}
+          onLivenessPassed={onEnrollmentLivenessPassed}
           onCapture={onValidFrame}
         />
       )}
