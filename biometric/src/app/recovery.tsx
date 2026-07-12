@@ -1,7 +1,6 @@
 import { router } from 'expo-router';
 import React, { useCallback, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Platform,
@@ -16,10 +15,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { T } from '../design-system/theme2';
 import { deviceRecoveryService } from '../services/DeviceRecoveryService';
-import { useAppDispatch } from '../store/hooks';
+import { deviceBindingService } from '../services/DeviceBindingService';
+import { sessionService } from '../services/SessionService';
 import BiometricScanner from '../components/BiometricScanner';
 
-type Stage = 'request_otp' | 'verify_otp' | 'liveness' | 'capture' | 'success';
+type Stage = 'request_otp' | 'verify_otp' | 'capture' | 'liveness' | 'success';
 
 export default function RecoveryScreen() {
   const [stage, setStage] = useState<Stage>('request_otp');
@@ -32,6 +32,9 @@ export default function RecoveryScreen() {
   // For BiometricScanner
   const [captured, setCaptured] = useState(0);
   const required = 1; // Only need 1 live embedding for similarity check
+  const [pendingEmbedding, setPendingEmbedding] = useState<Float32Array | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [pendingConfidence, setPendingConfidence] = useState<number | null>(null); // Stored for consistency with other flows and future audit logging
 
   const handleRequestOTP = async () => {
     if (!employeeId.trim()) {
@@ -47,7 +50,7 @@ export default function RecoveryScreen() {
       } else {
         setError('Employee ID not found or OTP failed to send.');
       }
-    } catch (e) {
+    } catch {
       setError('Failed to request OTP. Please check your connection.');
     } finally {
       setBusy(false);
@@ -64,11 +67,11 @@ export default function RecoveryScreen() {
       const token = await deviceRecoveryService.verifyOTP(employeeId, otpCode);
       if (token) {
         setRecoveryToken(token);
-        setStage('liveness'); // Move to biometric phase
+        setStage('capture'); // Move to face capture phase first
       } else {
         setError('Invalid or expired OTP.');
       }
-    } catch (e) {
+    } catch {
       setError('Failed to verify OTP.');
     } finally {
       setBusy(false);
@@ -79,7 +82,25 @@ export default function RecoveryScreen() {
     if (stage !== 'capture' || !recoveryToken) return;
     try {
       setCaptured(1);
-      const success = await deviceRecoveryService.recoverDevice(recoveryToken, embedding);
+      // Store embedding and confidence for liveness verification - recovery happens after liveness passes
+      setPendingEmbedding(embedding);
+      setPendingConfidence(confidence);
+      setStage('liveness'); // Move to liveness stage after capture
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Capture failed.';
+      setError(msg);
+      setCaptured(0);
+    }
+  }, [stage, recoveryToken]);
+
+  const handleLivenessPassed = useCallback(async () => {
+    if (!pendingEmbedding || !recoveryToken) {
+      setError('No face data available. Please try again.');
+      setStage('capture');
+      return;
+    }
+    try {
+      const success = await deviceRecoveryService.recoverDevice(recoveryToken, pendingEmbedding);
       if (success) {
         setStage('success');
       } else {
@@ -88,16 +109,14 @@ export default function RecoveryScreen() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Recovery failed.';
       setError(msg);
-      // If biometric fails, they must start over or contact IT. We will let them retry scanning once,
-      // but the token might be invalidated by the cloud. For UX, we just show the error.
       setCaptured(0);
+      setPendingEmbedding(null);
+      setPendingConfidence(null);
+      setStage('capture');
     }
-  }, [stage, recoveryToken]);
+  }, [pendingEmbedding, recoveryToken]);
 
   const handleLivenessFailed = useCallback(async (reason: string) => {
-    const { deviceBindingService } = require('../services/DeviceBindingService');
-    const { sessionService } = require('../services/SessionService');
-    
     const deviceId = await deviceBindingService.getDeviceId();
     const lockoutStatus = await sessionService.recordFailure(deviceId);
     
@@ -107,9 +126,11 @@ export default function RecoveryScreen() {
       setStage('request_otp');
     } else {
       setError(`Liveness check failed (${reason}). ${lockoutStatus.attemptsRemaining} attempts remaining. Retrying...`);
-      // Restart liveness automatically
-      const { livenessService } = require('../services/ai/LivenessService');
-      livenessService.startSession();
+      // Restart from capture stage
+      setCaptured(0);
+      setPendingEmbedding(null);
+      setPendingConfidence(null);
+      setStage('capture');
     }
   }, []);
 
@@ -191,7 +212,7 @@ export default function RecoveryScreen() {
         </KeyboardAvoidingView>
       )}
 
-      {/* ── Stage: Liveness & Capture (Biometric Check) ──────────────────────── */}
+      {/* ── Stage: Capture & Liveness (Biometric Check) ──────────────────────── */}
       {(stage === 'liveness' || stage === 'capture') && (
         <BiometricScanner
           mode="authentication" // We use authentication mode UX (Verifying Identity)
@@ -199,7 +220,7 @@ export default function RecoveryScreen() {
           captured={captured}
           requiredCaptures={required}
           error={error}
-          onLivenessPassed={() => setStage('capture')}
+          onLivenessPassed={handleLivenessPassed}
           onLivenessFailed={handleLivenessFailed}
           onCapture={onValidFrame}
         />

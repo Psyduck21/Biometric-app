@@ -131,6 +131,7 @@ export interface AuditLog {
 export type AuditAction =
     | 'enroll'
     | 'enroll_fail'
+    | 'enrollment_cloud_fallback'
     | 'auth'
     | 'auth_fail'
     | 'auth_locked'
@@ -202,7 +203,7 @@ export interface EnrollmentSession {
     capturedSamples: number;
     requiredSamples: number;
     samples: EnrollmentSample[];
-    status: 'capturing' | 'liveness' | 'processing' | 'complete' | 'failed';
+    status: 'capturing' | 'processing' | 'complete' | 'failed';
     startedAt: number;
     currentChallenge?: string;
 }

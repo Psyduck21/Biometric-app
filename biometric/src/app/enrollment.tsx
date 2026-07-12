@@ -338,7 +338,7 @@ export default function EnrollmentScreen() {
           <View style={s.successIcon}>
             <Text style={s.successCheck}>✓</Text>
           </View>
-          <Text style={s.successHeading}>You're enrolled!</Text>
+          <Text style={s.successHeading}>You&apos;re enrolled!</Text>
           <Text style={s.successSub}>
             Your face templates are encrypted and saved securely on this device.
           </Text>

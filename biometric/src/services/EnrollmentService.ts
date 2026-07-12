@@ -8,6 +8,8 @@ import { SyncQueueRepository } from '../database/repositories/SyncQueueRepositor
 import { UserRepository } from '../database/repositories/UserRepository';
 import { ConfigRepository } from '../database/repositories/ConfigRepository';
 import { dbClient } from '../database/DatabaseClient';
+import { apiService } from './network/ApiService';
+import { syncService } from './network/SyncService';
 import {
     EnrollmentSession,
     EnrollmentSample,
@@ -80,7 +82,6 @@ export class EnrollmentService {
                 metadata:       JSON.stringify(security),
             });
             
-            const { syncService } = require('./network/SyncService');
             syncService.syncBatch().catch((e: any) => console.error(e));
 
             throw new Error(`Device failed security check: ${specificReason}`);
@@ -110,10 +111,9 @@ export class EnrollmentService {
     /**
      * Adds one biometric sample to an in-progress enrollment session.
      *
-     * Each call should be preceded by a successful liveness challenge on at
-     * least one of the five frames (the UI layer enforces which sample requires
-     * the challenge). This service layer only validates that the data is present
-     * and that we have not exceeded the required sample count.
+     * The UI layer now performs liveness verification after all samples are captured.
+     * This service layer only validates that the data is present and that we have
+     * not exceeded the required sample count.
      *
      * @param sessionId   - The UUID of the enrollment session.
      * @param alignedFrame - The 112×112 RGB aligned face image.
@@ -293,9 +293,12 @@ export class EnrollmentService {
 
             // --- RE-ENROLLMENT SECURITY GATE (IDENTITY HIJACKING PREVENTION) ---
             const activeTemplates = await FaceTemplateRepository.getActive(session.userId);
+            let localSimPassed = true;
+            let maxSim = 0;
+
+            // Step 1: Local template verification (fast path)
             if (activeTemplates.length > 0) {
                 console.log(`[Enrollment] Re-enrollment detected. Checking similarity against ${activeTemplates.length} existing templates...`);
-                let maxSim = 0;
 
                 for (const oldTemplate of activeTemplates) {
                     try {
@@ -335,38 +338,61 @@ export class EnrollmentService {
                     return { success: false, failureReason: 'identity_mismatch', consistencyScore };
                 }
             } else {
-                // LOCAL STORAGE IS CLEARED OR FRESH INSTALL
-                // Verify against the cloud using our new RPC
-                const { apiService } = require('./network/ApiService');
-                console.log(`[Enrollment] No local templates found. Verifying re-enrollment against cloud...`);
-                
-                try {
-                    const response = await apiService.post('/rpc/authorize_re_enrollment', {
-                        p_user_id: session.userId,
-                        p_embedding: '[' + Array.from(masterEmbedding).join(',') + ']'
+                console.log(`[Enrollment] No local templates found. Proceeding to cloud verification...`);
+            }
+
+            // Step 2: Cloud template verification (always performed for additional security)
+            console.log(`[Enrollment] Verifying re-enrollment against cloud templates...`);
+            
+            try {
+                const response = await apiService.post('/rpc/authorize_re_enrollment', {
+                    p_user_id: session.userId,
+                    p_embedding: '[' + Array.from(masterEmbedding).join(',') + ']'
+                });
+
+                if (!response.success || (response.data && typeof response.data === 'object' && 'success' in response.data && response.data.success === false)) {
+                    const errorMsg = (response.data && typeof response.data === 'object' && 'error' in response.data) ? (response.data as any).error : (response as any).error || 'Identity mismatch detected by cloud.';
+                    console.error(`[Enrollment] IDENTITY MISMATCH! Cloud rejected re-enrollment: ${errorMsg}`);
+                    
+                    // Log the takeover attempt
+                    await auditService.log({
+                        user_id: session.userId,
+                        action: 'identity_takeover_attempt',
+                        entity_type: 'face_template',
+                        outcome: 'blocked',
+                        failure_reason: 'cloud_identity_mismatch',
+                        metadata: JSON.stringify({ 
+                            error: errorMsg,
+                            local_similarity: maxSim,
+                            local_templates_count: activeTemplates.length
+                        }),
                     });
 
-                    if (!response.success || (response.data && response.data.success === false)) {
-                        const errorMsg = response.data?.error || response.error || 'Identity mismatch detected by cloud.';
-                        console.error(`[Enrollment] IDENTITY MISMATCH! Cloud rejected re-enrollment: ${errorMsg}`);
-                        
-                        // Log the takeover attempt
-                        await auditService.log({
-                            user_id: session.userId,
-                            action: 'identity_takeover_attempt',
-                            entity_type: 'face_template',
-                            outcome: 'blocked',
-                            failure_reason: 'cloud_identity_mismatch',
-                            metadata: JSON.stringify({ error: errorMsg }),
-                        });
-
-                        this.sessions.delete(sessionId);
-                        return { success: false, failureReason: 'identity_mismatch', consistencyScore };
-                    }
-                    
-                    console.log(`[Enrollment] Cloud verification passed or fresh enrollment confirmed.`);
-                } catch (e) {
-                    console.error('[Enrollment] Failed to verify re-enrollment with cloud:', e);
+                    this.sessions.delete(sessionId);
+                    return { success: false, failureReason: 'identity_mismatch', consistencyScore };
+                }
+                
+                console.log(`[Enrollment] Cloud verification passed. Both local and cloud checks successful.`);
+            } catch (e) {
+                console.error('[Enrollment] Failed to verify re-enrollment with cloud:', e);
+                // If local templates exist and passed, allow enrollment to proceed offline
+                // This prevents blocking users when network is unavailable but local verification passed
+                if (activeTemplates.length > 0 && localSimPassed) {
+                    console.warn('[Enrollment] Cloud verification failed, but local templates passed. Allowing offline enrollment with local verification only.');
+                    await auditService.log({
+                        user_id: session.userId,
+                        action: 'enrollment_cloud_fallback',
+                        entity_type: 'face_template',
+                        outcome: 'success',
+                        failure_reason: 'cloud_unavailable',
+                        metadata: JSON.stringify({ 
+                            local_similarity: maxSim,
+                            local_templates_count: activeTemplates.length,
+                            error: e instanceof Error ? e.message : 'Unknown error'
+                        }),
+                    });
+                } else {
+                    // No local templates - require cloud verification
                     this.sessions.delete(sessionId);
                     throw new Error('Network required to verify identity for re-enrollment.');
                 }

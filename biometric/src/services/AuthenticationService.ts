@@ -12,6 +12,7 @@ export interface AuthResult {
     sessionId?: string;
     similarityScore?: number;
     livenessScore?: number;
+    challengeType?: string;
     failureReason?: 'no_match' | 'device_mismatch' | 'locked' | 'storage_error' | 'offline_locked' | 'security_violation' | 'suspended';
     attemptsRemaining?: number;
 }
@@ -160,7 +161,7 @@ export class AuthenticationService {
 
         // 5. Success Flow
         sessionService.clearFailures(deviceId);
-        const session = await sessionService.createSession(userId, 'BLINK', bestScore, livenessScore);
+        const session = await sessionService.createSession(userId, 'MULTI_CHALLENGE', bestScore, livenessScore);
         
         await auditService.log({
             user_id: userId,
@@ -179,6 +180,7 @@ export class AuthenticationService {
             sessionId: session.id,
             similarityScore: bestScore,
             livenessScore,
+            challengeType: 'MULTI_CHALLENGE',
         };
     }
 

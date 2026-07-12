@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import {
   ActivityIndicator,
-  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -120,12 +119,20 @@ export function BiometricScannerCore({
     if (stage === 'liveness') {
       livenessService.startSession();
       livenessFrameCount.setBlocking(0);
-      // Delay initial capture to avoid instant captures
-      lastCaptureTime.setBlocking(Date.now() + 2000);
+      // Start processing immediately for liveness - no delay needed
+      lastCaptureTime.setBlocking(Date.now());
+      
+      // Set initial liveness instruction immediately
+      const active = livenessService.getActiveChallenge();
+      if (active) {
+        const instr = livenessService.getInstructionForChallenge(active);
+        setLivenessInstruction(instr);
+      }
     } else if (stage === 'capture') {
       lastCaptureTime.setBlocking(Date.now());
+      setLivenessInstruction('Please look at the camera');
     }
-  }, [stage]);
+  }, [stage, lastCaptureTime, livenessFrameCount]);
 
   // ── Callbacks mapped to JS thread ────────────────────────────────────────
   const dispatchToJS = useCallback((embeddingArray: number[], confidence: number) => {
@@ -171,7 +178,7 @@ export function BiometricScannerCore({
       livenessService.startSession();
       livenessFrameCount.setBlocking(0);
     }
-  }, [onLivenessFailed]);
+  }, [onLivenessFailed, livenessFrameCount]);
 
   const safeLog = useCallback((msg: string) => { console.log(msg); }, []);
 
